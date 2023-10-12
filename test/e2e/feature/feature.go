@@ -363,6 +363,10 @@ var (
 	// (used for testing fine-grained SupplementalGroups control <https://kep.k8s.io/3619>)
 	SupplementalGroupsPolicy = framework.WithFeature(framework.ValidFeatures.Add("SupplementalGroupsPolicy"))
 
+	// owner: @chaunceyctx
+	// remove termination log file automatically when container has been removed.
+	TerminationLogFilePrune = framework.WithFeature(framework.ValidFeatures.Add("TerminationLogFilePrune"))
+
 	// Owner: sig-network
 	// Marks tests that require a cluster with Topology Hints enabled.
 	TopologyHints = framework.WithFeature(framework.ValidFeatures.Add("Topology Hints"))
