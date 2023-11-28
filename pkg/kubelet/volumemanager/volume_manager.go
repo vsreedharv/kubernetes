@@ -490,7 +490,7 @@ func (vm *volumeManager) getVolumesNotInDSW(uniquePodName types.UniquePodName, e
 
 	for _, volumeToMount := range vm.desiredStateOfWorld.GetVolumesToMount() {
 		if volumeToMount.PodName == uniquePodName {
-			volumesNotInDSW.Delete(volumeToMount.OuterVolumeSpecName)
+			volumesNotInDSW.Delete(volumeToMount.OuterVolumeSpecNames...)
 		}
 	}
 
@@ -505,7 +505,7 @@ func (vm *volumeManager) getUnattachedVolumes(uniquePodName types.UniquePodName)
 		if volumeToMount.PodName == uniquePodName &&
 			volumeToMount.PluginIsAttachable &&
 			!vm.actualStateOfWorld.VolumeExists(volumeToMount.VolumeName) {
-			unattachedVolumes = append(unattachedVolumes, volumeToMount.OuterVolumeSpecName)
+			unattachedVolumes = append(unattachedVolumes, volumeToMount.OuterVolumeSpecNames...)
 		}
 	}
 	slices.Sort(unattachedVolumes)
