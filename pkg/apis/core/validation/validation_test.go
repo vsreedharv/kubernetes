@@ -13672,6 +13672,80 @@ func TestValidatePodUpdate(t *testing.T) {
 			err:  "pod updates may not change fields other than",
 			test: "the podAntiAffinity cannot be updated on gated pods",
 		},
+		{
+			old: *podtest.MakePod("foo",
+				podtest.SetDNSConfig(&core.PodDNSConfig{
+					Nameservers: []string{
+						"1.2.3.4",
+					},
+				}),
+			),
+			new: *podtest.MakePod("foo",
+				podtest.SetDNSConfig(&core.PodDNSConfig{
+					Nameservers: []string{
+						"5.6.7.8",
+					},
+				}),
+			),
+			err:  "pod updates may not change fields other than",
+			test: "DNSConfig is normally immutable",
+		},
+		{
+			old: *podtest.MakePod("foo",
+				podtest.SetDNSConfig(&core.PodDNSConfig{
+					Nameservers: []string{
+						"1.2.3.04",
+					},
+				}),
+			),
+			new: *podtest.MakePod("foo",
+				podtest.SetDNSConfig(&core.PodDNSConfig{
+					Nameservers: []string{
+						"1.2.3.4",
+					},
+				}),
+			),
+			test: "DNSConfig allows fixing invalid IP",
+		},
+		{
+			old: *podtest.MakePod("foo",
+				podtest.SetHostAliases(
+					core.HostAlias{
+						IP:        "1.2.3.4",
+						Hostnames: []string{"foo"},
+					},
+				),
+			),
+			new: *podtest.MakePod("foo",
+				podtest.SetHostAliases(
+					core.HostAlias{
+						IP:        "5.6.7.8",
+						Hostnames: []string{"foo"},
+					},
+				),
+			),
+			err:  "pod updates may not change fields other than",
+			test: "HostAliases is normally immutable",
+		},
+		{
+			old: *podtest.MakePod("foo",
+				podtest.SetHostAliases(
+					core.HostAlias{
+						IP:        "1.2.3.04",
+						Hostnames: []string{"foo"},
+					},
+				),
+			),
+			new: *podtest.MakePod("foo",
+				podtest.SetHostAliases(
+					core.HostAlias{
+						IP:        "1.2.3.4",
+						Hostnames: []string{"foo"},
+					},
+				),
+			),
+			test: "HostAliases allows fixing invalid IP",
+		},
 	}
 	for _, test := range tests {
 		test.new.ObjectMeta.ResourceVersion = "1"
@@ -18617,6 +18691,16 @@ func TestValidateServiceUpdate(t *testing.T) {
 			},
 			numErrs: 0,
 		}, {
+			name: "pre-existing invalid clusterIP can be fixed",
+			tweakSvc: func(oldSvc, newSvc *core.Service) {
+				oldSvc.Spec.ClusterIP = "1.2.3.04"
+				oldSvc.Spec.ClusterIPs = []string{"1.2.3.04"}
+				newSvc.Spec.ClusterIP = "1.2.3.4"
+				newSvc.Spec.ClusterIPs = []string{"1.2.3.4"}
+				newSvc.Labels["foo"] = "bar"
+			},
+			numErrs: 0,
+		}, {
 			name: "pre-existing invalid clusterIP ignored when adding clusterIPs",
 			tweakSvc: func(oldSvc, newSvc *core.Service) {
 				oldSvc.Spec.ClusterIP = "1.2.3.04"
@@ -18631,6 +18715,20 @@ func TestValidateServiceUpdate(t *testing.T) {
 			},
 			numErrs: 0,
 		}, {
+			name: "pre-existing invalid clusterIP can be fixed when adding clusterIPs",
+			tweakSvc: func(oldSvc, newSvc *core.Service) {
+				oldSvc.Spec.ClusterIP = "1.2.3.04"
+				oldSvc.Spec.ClusterIPs = []string{"1.2.3.04"}
+				oldSvc.Spec.IPFamilyPolicy = &singleStack
+				oldSvc.Spec.IPFamilies = []core.IPFamily{core.IPv4Protocol}
+
+				newSvc.Spec.ClusterIP = "1.2.3.4"
+				newSvc.Spec.ClusterIPs = []string{"1.2.3.4", "2001:db8::4"}
+				newSvc.Spec.IPFamilyPolicy = &requireDualStack
+				newSvc.Spec.IPFamilies = []core.IPFamily{core.IPv4Protocol, core.IPv6Protocol}
+			},
+			numErrs: 0,
+		}, {
 			name: "pre-existing invalid clusterIP ignored when removing clusterIPs",
 			tweakSvc: func(oldSvc, newSvc *core.Service) {
 				oldSvc.Spec.ClusterIP = "1.2.3.04"
@@ -18640,6 +18738,20 @@ func TestValidateServiceUpdate(t *testing.T) {
 
 				newSvc.Spec.ClusterIP = "1.2.3.04"
 				newSvc.Spec.ClusterIPs = []string{"1.2.3.04"}
+				newSvc.Spec.IPFamilyPolicy = &singleStack
+				newSvc.Spec.IPFamilies = []core.IPFamily{core.IPv4Protocol}
+			},
+			numErrs: 0,
+		}, {
+			name: "pre-existing invalid clusterIP can be fixed when removing clusterIPs",
+			tweakSvc: func(oldSvc, newSvc *core.Service) {
+				oldSvc.Spec.ClusterIP = "1.2.3.04"
+				oldSvc.Spec.ClusterIPs = []string{"1.2.3.04", "2001:db::4"}
+				oldSvc.Spec.IPFamilyPolicy = &requireDualStack
+				oldSvc.Spec.IPFamilies = []core.IPFamily{core.IPv4Protocol, core.IPv6Protocol}
+
+				newSvc.Spec.ClusterIP = "1.2.3.4"
+				newSvc.Spec.ClusterIPs = []string{"1.2.3.4"}
 				newSvc.Spec.IPFamilyPolicy = &singleStack
 				newSvc.Spec.IPFamilies = []core.IPFamily{core.IPv4Protocol}
 			},
