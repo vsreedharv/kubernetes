@@ -56,6 +56,11 @@ const (
 	// is deployment.spec.replicas + maxSurge. Used by the underlying replica sets to estimate their
 	// proportions in case the deployment has surge replicas.
 	MaxReplicasAnnotation = "deployment.kubernetes.io/max-replicas"
+	// ReplicaSetReplicasBeforeScaleAnnotation is the number of replicas a replica set had before scaling began.
+	// The presence of this annotation indicates that a replica set has not yet fully scaled.
+	// The value is used by the underlying replica sets to estimate their scale proportions if the deployment has surge replicas
+	// (e.g. terminating pods) and the replica set is partially scaled due to the deployment's .spec.podReplacementPolicy.
+	ReplicaSetReplicasBeforeScaleAnnotation = "deployment.kubernetes.io/replicaset-replicas-before-scale"
 
 	// RollbackRevisionNotFound is not found rollback event reason
 	RollbackRevisionNotFound = "DeploymentRollbackRevisionNotFound"
@@ -293,12 +298,13 @@ func SetNewReplicaSetAnnotations(ctx context.Context, deployment *apps.Deploymen
 }
 
 var annotationsToSkip = map[string]bool{
-	v1.LastAppliedConfigAnnotation: true,
-	RevisionAnnotation:             true,
-	RevisionHistoryAnnotation:      true,
-	DesiredReplicasAnnotation:      true,
-	MaxReplicasAnnotation:          true,
-	apps.DeprecatedRollbackTo:      true,
+	v1.LastAppliedConfigAnnotation:          true,
+	RevisionAnnotation:                      true,
+	RevisionHistoryAnnotation:               true,
+	DesiredReplicasAnnotation:               true,
+	MaxReplicasAnnotation:                   true,
+	ReplicaSetReplicasBeforeScaleAnnotation: true,
+	apps.DeprecatedRollbackTo:               true,
 }
 
 // skipCopyAnnotation returns true if we should skip copying the annotation with the given annotation key
