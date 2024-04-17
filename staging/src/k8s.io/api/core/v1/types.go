@@ -292,6 +292,10 @@ const (
 	MountOptionAnnotation = "volume.beta.kubernetes.io/mount-options"
 )
 
+// Desired rule to fix issue checking capacity > 0 constraint with proper
+// error message/field paths
+// -k8s:validation:allOf[0]:properties:capacity:additionalProperties:cel[0]:rule>quantity(self).isGreaterThan(0)
+
 // +genclient
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -304,12 +308,31 @@ type PersistentVolume struct {
 	// Standard object's metadata.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	// +optional
+	// +k8s:validation:cel[0]:rule>!has(self.name) || !format.named("dns1123Subdomain").value().validate(self.name).hasValue()
+	// +k8s:validation:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self.name).value()[0]
+	// +k8s:validation:cel[0]:fieldPath>.name
+	// +k8s:validation:cel[1]:rule>!has(self.__namespace__)
+	// +k8s:validation:cel[1]:message>not allowed on this type
+	// +k8s:validation:cel[1]:fieldPath>.namespace
+	// +k8s:validation:cel[1]:reason>FieldValueForbidden
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// spec defines a specification of a persistent volume owned by the cluster.
 	// Provisioned by an administrator.
 	// More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#persistent-volumes
 	// +optional
+	// +k8s:validation:cel[0]:rule>has(self.capacity) && self.capacity.size() > 0
+	// +k8s:validation:cel[0]:reason>FieldValueRequired
+	// +k8s:validation:cel[0]:fieldPath>.capacity
+	// +k8s:validation:cel[0]:message>must specify a capacity
+	// +k8s:validation:cel[1]:rule>has(self.capacity) && has(self.capacity.storage) && self.capacity.size() == 1
+	// +k8s:validation:cel[1]:reason>FieldValueInvalid
+	// +k8s:validation:cel[1]:fieldPath>.capacity
+	// +k8s:validation:cel[1]:message>Supported values: ["storage"]
+	// +k8s:validation:cel[2]:rule>!has(self.storageClassName) || self.storageClassName.size() == 0 || !format.named("dns1123Subdomain").value().validate(self.storageClassName).hasValue()
+	// +k8s:validation:cel[2]:reason>FieldValueInvalid
+	// +k8s:validation:cel[2]:fieldPath>.storageClassName
+	// +k8s:validation:cel[2]:messageExpression>format.named("dns1123Subdomain").value().validate(self.storageClassName).value()[0]
 	Spec PersistentVolumeSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
 
 	// status represents the current information/status for the persistent volume.
@@ -320,18 +343,61 @@ type PersistentVolume struct {
 	Status PersistentVolumeStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
 }
 
+// CEL Rules needed to be placed here (rather than directly on PersistentVolumeSource)
+// due to embedded types not sharing their validations with their parent types.
+// (bug in kube-openapi?)
+
 // PersistentVolumeSpec is the specification of a persistent volume.
+//
+// +k8s:validation:cel[0]:rule>    has(self.gcePersistentDisk)
+// +k8s:validation:cel[0]:rule> || has(self.awsElasticBlockStore)
+// +k8s:validation:cel[0]:rule> || has(self.hostPath)
+// +k8s:validation:cel[0]:rule> || has(self.glusterfs)
+// +k8s:validation:cel[0]:rule> || has(self.nfs)
+// +k8s:validation:cel[0]:rule> || has(self.rbd)
+// +k8s:validation:cel[0]:rule> || has(self.iscsi)
+// +k8s:validation:cel[0]:rule> || has(self.cinder)
+// +k8s:validation:cel[0]:rule> || has(self.cephfs)
+// +k8s:validation:cel[0]:rule> || has(self.fc)
+// +k8s:validation:cel[0]:rule> || has(self.flocker)
+// +k8s:validation:cel[0]:rule> || has(self.flexVolume)
+// +k8s:validation:cel[0]:rule> || has(self.azureFile)
+// +k8s:validation:cel[0]:rule> || has(self.vsphereVolume)
+// +k8s:validation:cel[0]:rule> || has(self.quobyte)
+// +k8s:validation:cel[0]:rule> || has(self.azureDisk)
+// +k8s:validation:cel[0]:rule> || has(self.photonPersistentDisk)
+// +k8s:validation:cel[0]:rule> || has(self.portworxVolume)
+// +k8s:validation:cel[0]:rule> || has(self.scaleIO)
+// +k8s:validation:cel[0]:rule> || has(self.local)
+// +k8s:validation:cel[0]:rule> || has(self.storageos)
+// +k8s:validation:cel[0]:rule> || has(self.csi)
+// +k8s:validation:cel[0]:message>must specify a volume type
+// +k8s:validation:cel[0]:reason>FieldValueRequired
+// +k8s:validation:cel[1]:rule>!has(self.hostPath) || self.hostPath.path != "/" || self.persistentVolumeReclaimPolicy != "Recycle"
+// +k8s:validation:cel[1]:fieldPath>.persistentVolumeReclaimPolicy
+// +k8s:validation:cel[1]:message>may not be 'recycle' for a hostPath mount of '/'
+// +k8s:validation:cel[1]:reason>FieldValueForbidden
+// +k8s:validation:cel[2]:rule>has(self.csi) || !has(self.volumeAttributesClassName)
+// +k8s:validation:cel[2]:message>has to be specified when using volumeAttributesClassName
+// +k8s:validation:cel[2]:reason>FieldValueRequired
+// +k8s:validation:cel[2]:fieldPath>.csi
 type PersistentVolumeSpec struct {
 	// capacity is the description of the persistent volume's resources and capacity.
 	// More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#capacity
 	// +optional
+	// +k8s:validation:additionalProperties:cel[0]:rule>quantity(self).asApproximateFloat() > 0
+	// +k8s:validation:additionalProperties:cel[0]:message>must be greater than zero
 	Capacity ResourceList `json:"capacity,omitempty" protobuf:"bytes,1,rep,name=capacity,casttype=ResourceList,castkey=ResourceName"`
 	// persistentVolumeSource is the actual volume backing the persistent volume.
 	PersistentVolumeSource `json:",inline" protobuf:"bytes,2,opt,name=persistentVolumeSource"`
 	// accessModes contains all ways the volume can be mounted.
 	// More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#access-modes
-	// +optional
+	// +required
 	// +listType=atomic
+	// +k8s:validation:minItems=1
+	// +k8s:validation:cel[0]:rule>!self.exists(c, c == "ReadWriteOncePod") || self.size() == 1
+	// +k8s:validation:cel[0]:message>may not use ReadWriteOncePod with other access modes
+	// +k8s:validation:cel[0]:reason>FieldValueForbidden
 	AccessModes []PersistentVolumeAccessMode `json:"accessModes,omitempty" protobuf:"bytes,3,rep,name=accessModes,casttype=PersistentVolumeAccessMode"`
 	// claimRef is part of a bi-directional binding between PersistentVolume and PersistentVolumeClaim.
 	// Expected to be non-nil when bound.
@@ -374,12 +440,19 @@ type PersistentVolumeSpec struct {
 	// This is an alpha field and requires enabling VolumeAttributesClass feature.
 	// +featureGate=VolumeAttributesClass
 	// +optional
+	// +k8s:validation:cel[0]:rule> self.size() > 0
+	// +k8s:validation:cel[0]:message> an empty string is disallowed
+	// +k8s:validation:cel[0]:reason> FieldValueRequired
+	// +k8s:validation:cel[1]:rule>self.size() == 0 || !format.named("dns1123Subdomain").value().validate(self).hasValue()
+	// +k8s:validation:cel[1]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()[0]
+	// +k8s:validation:cel[1]:reason>FieldValueInvalid
 	VolumeAttributesClassName *string `json:"volumeAttributesClassName,omitempty" protobuf:"bytes,10,opt,name=volumeAttributesClassName"`
 }
 
 // VolumeNodeAffinity defines constraints that limit what nodes this volume can be accessed from.
 type VolumeNodeAffinity struct {
 	// required specifies hard node constraints that must be met.
+	// +required
 	Required *NodeSelector `json:"required,omitempty" protobuf:"bytes,1,opt,name=required"`
 }
 
@@ -853,6 +926,10 @@ type HostPathVolumeSource struct {
 	// path of the directory on the host.
 	// If the path is a symlink, it will follow the link to the real path.
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:cel[0]:rule>self.split('/').all(e, e != "..")
+	// +k8s:validation:cel[0]:message>must not contain '..'
 	Path string `json:"path" protobuf:"bytes,1,opt,name=path"`
 	// type for HostPath Volume
 	// Defaults to ""
@@ -3215,6 +3292,9 @@ const (
 type NodeSelector struct {
 	// Required. A list of node selector terms. The terms are ORed.
 	// +listType=atomic
+	// +k8s:validation:cel[0]:rule>self.size() > 0
+	// +k8s:validation:cel[0]:reason>FieldValueRequired
+	// +k8s:validation:cel[0]:message>must have at least one node selector term
 	NodeSelectorTerms []NodeSelectorTerm `json:"nodeSelectorTerms" protobuf:"bytes,1,rep,name=nodeSelectorTerms"`
 }
 
@@ -3226,10 +3306,36 @@ type NodeSelectorTerm struct {
 	// A list of node selector requirements by node's labels.
 	// +optional
 	// +listType=atomic
+	// +k8s:validation:items:cel[0]:rule>self.operator == 'In' || self.operator == 'NotIn' ? self.values.size() > 0 : true
+	// +k8s:validation:items:cel[0]:message>must be specified when `operator` is 'In' or 'NotIn'
+	// +k8s:validation:items:cel[0]:reason>FieldValueRequired
+	// +k8s:validation:items:cel[1]:rule>self.operator == 'Exists' || self.operator == 'DoesNotExist' ? self.values.size() == 0 : true
+	// +k8s:validation:items:cel[1]:message>may not be specified when `operator` is 'Exists' or 'DoesNotExist'
+	// +k8s:validation:items:cel[1]:reason>FieldValueForbidden
+	// +k8s:validation:items:cel[2]:rule>self.operator == 'Gt' || self.operator == 'Lt' ? self.values.size() == 1 : true
+	// +k8s:validation:items:cel[2]:message>must be specified single value when `operator` is 'Lt' or 'Gt'
+	// +k8s:validation:items:cel[2]:reason>FieldValueRequired
+	//!TODO: Qualfiedname can return multiple errors, would it be simple to allow multiple strings to be returned for multiple errors?
+	// +k8s:validation:items:properties:key:cel[0]:rule>!format.named("qualifiedName").value().validate(self).hasValue()
+	// +k8s:validation:items:properties:key:cel[0]:messageExpression>format.named("qualifiedName").value().validate(self).value()[0]
+	// +k8s:validation:items:properties:key:cel[1]:rule>!format.named("qualifiedName").value().validate(self).hasValue() || format.named("qualifiedName").value().validate(self).value().size() < 2
+	// +k8s:validation:items:properties:key:cel[1]:messageExpression>format.named("qualifiedName").value().validate(self).value()[1]
 	MatchExpressions []NodeSelectorRequirement `json:"matchExpressions,omitempty" protobuf:"bytes,1,rep,name=matchExpressions"`
 	// A list of node selector requirements by node's fields.
 	// +optional
 	// +listType=atomic
+	// +k8s:validation:items:cel[0]:rule>self.operator == 'In' || self.operator == 'NotIn' ? self.values.size() == 1 : true
+	// +k8s:validation:items:cel[0]:message>must be only one value when `operator` is 'In' or 'NotIn' for node field selector
+	// +k8s:validation:items:cel[0]:reason>FieldValueRequired
+	// +k8s:validation:items:cel[1]:rule>self.operator != 'In' || self.operator == 'NotIn'
+	// +k8s:validation:items:cel[1]:message>not a valid selector operator
+	// +k8s:validation:items:cel[1]:reason>FieldValueInvalid
+	// +k8s:validation:items:cel[2]:rule>["metadata.name"].exists(n, n == self.key)
+	// +k8s:validation:items:cel[2]:message>not a valid field selector key
+	// +k8s:validation:items:cel[2]:reason>FieldValueInvalid
+	//!TODO: Use variables for name format to use here, fortunately only one is valid so we use that
+	// +k8s:validation:items:properties:values:items:cel[0]:rule>!format.named("dns1123Subdomain").value().validate(self).hasValue()
+	// +k8s:validation:items:properties:values:items:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()[0]
 	MatchFields []NodeSelectorRequirement `json:"matchFields,omitempty" protobuf:"bytes,2,rep,name=matchFields"`
 }
 
