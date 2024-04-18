@@ -24598,7 +24598,7 @@ func schema_k8sio_api_core_v1_NodeSelectorTerm(ref common.ReferenceCallback) com
 																	"key": {
 																		VendorExtensible: spec.VendorExtensible{
 																			Extensions: spec.Extensions{
-																				"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"qualifiedName\").value().validate(self).value()[0]", "rule": "!format.named(\"qualifiedName\").value().validate(self).hasValue()"}, map[string]interface{}{"messageExpression": "format.named(\"qualifiedName\").value().validate(self).value()[1]", "rule": "!format.named(\"qualifiedName\").value().validate(self).hasValue() || format.named(\"qualifiedName\").value().validate(self).value().size() < 2"}},
+																				"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"qualifiedName\").value().validate(self).value()", "rule": "!format.named(\"qualifiedName\").value().validate(self).hasValue()"}},
 																			},
 																		},
 																	},
@@ -24635,7 +24635,7 @@ func schema_k8sio_api_core_v1_NodeSelectorTerm(ref common.ReferenceCallback) com
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "A list of node selector requirements by node's fields.",
+							Description: "A list of node selector requirements by node's fields. !TODO: Use variables for name format to use here, fortunately only one is valid so we use that",
 							AllOf: []spec.Schema{
 								{
 									SchemaProps: spec.SchemaProps{
@@ -24655,7 +24655,7 @@ func schema_k8sio_api_core_v1_NodeSelectorTerm(ref common.ReferenceCallback) com
 																							Schema: &spec.Schema{
 																								VendorExtensible: spec.VendorExtensible{
 																									Extensions: spec.Extensions{
-																										"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()[0]", "rule": "!format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
+																										"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()", "rule": "!format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
 																									},
 																								},
 																							},
@@ -25208,7 +25208,7 @@ func schema_k8sio_api_core_v1_PersistentVolume(ref common.ReferenceCallback) com
 					"metadata": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".name", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.name).value()[0]", "rule": "!has(self.name) || !format.named(\"dns1123Subdomain\").value().validate(self.name).hasValue()"}, map[string]interface{}{"fieldPath": ".namespace", "message": "not allowed on this type", "reason": "FieldValueForbidden", "rule": "!has(self.__namespace__)"}},
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".name", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.name).value()", "rule": "!has(self.name) || !format.named(\"dns1123Subdomain\").value().validate(self.name).hasValue()"}, map[string]interface{}{"fieldPath": ".namespace", "message": "not allowed on this type", "reason": "FieldValueForbidden", "rule": "!has(self.__namespace__)"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{
@@ -25220,7 +25220,7 @@ func schema_k8sio_api_core_v1_PersistentVolume(ref common.ReferenceCallback) com
 					"spec": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".capacity", "message": "must specify a capacity", "reason": "FieldValueRequired", "rule": "has(self.capacity) && self.capacity.size() > 0"}, map[string]interface{}{"fieldPath": ".capacity", "message": "Supported values: [\"storage\"]", "reason": "FieldValueInvalid", "rule": "has(self.capacity) && has(self.capacity.storage) && self.capacity.size() == 1"}, map[string]interface{}{"fieldPath": ".storageClassName", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).value()[0]", "reason": "FieldValueInvalid", "rule": "!has(self.storageClassName) || self.storageClassName.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).hasValue()"}},
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".capacity", "message": "must specify a capacity", "reason": "FieldValueRequired", "rule": "has(self.capacity) && self.capacity.size() > 0"}, map[string]interface{}{"fieldPath": ".capacity", "message": "Supported values: [\"storage\"]", "reason": "FieldValueInvalid", "rule": "has(self.capacity) && has(self.capacity.storage) && self.capacity.size() == 1"}, map[string]interface{}{"fieldPath": ".storageClassName", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).value()", "reason": "FieldValueInvalid", "rule": "!has(self.storageClassName) || self.storageClassName.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).hasValue()"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{
@@ -26134,7 +26134,7 @@ func schema_k8sio_api_core_v1_PersistentVolumeSpec(ref common.ReferenceCallback)
 					"volumeAttributesClassName": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "an empty string is disallowed", "reason": "FieldValueRequired", "rule": "self.size() > 0"}, map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()[0]", "reason": "FieldValueInvalid", "rule": "self.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "an empty string is disallowed", "reason": "FieldValueRequired", "rule": "self.size() > 0"}, map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()", "reason": "FieldValueInvalid", "rule": "self.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{

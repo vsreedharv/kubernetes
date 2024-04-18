@@ -309,7 +309,7 @@ type PersistentVolume struct {
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	// +optional
 	// +k8s:validation:cel[0]:rule>!has(self.name) || !format.named("dns1123Subdomain").value().validate(self.name).hasValue()
-	// +k8s:validation:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self.name).value()[0]
+	// +k8s:validation:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self.name).value()
 	// +k8s:validation:cel[0]:fieldPath>.name
 	// +k8s:validation:cel[1]:rule>!has(self.__namespace__)
 	// +k8s:validation:cel[1]:message>not allowed on this type
@@ -332,7 +332,7 @@ type PersistentVolume struct {
 	// +k8s:validation:cel[2]:rule>!has(self.storageClassName) || self.storageClassName.size() == 0 || !format.named("dns1123Subdomain").value().validate(self.storageClassName).hasValue()
 	// +k8s:validation:cel[2]:reason>FieldValueInvalid
 	// +k8s:validation:cel[2]:fieldPath>.storageClassName
-	// +k8s:validation:cel[2]:messageExpression>format.named("dns1123Subdomain").value().validate(self.storageClassName).value()[0]
+	// +k8s:validation:cel[2]:messageExpression>format.named("dns1123Subdomain").value().validate(self.storageClassName).value()
 	Spec PersistentVolumeSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
 
 	// status represents the current information/status for the persistent volume.
@@ -444,7 +444,7 @@ type PersistentVolumeSpec struct {
 	// +k8s:validation:cel[0]:message> an empty string is disallowed
 	// +k8s:validation:cel[0]:reason> FieldValueRequired
 	// +k8s:validation:cel[1]:rule>self.size() == 0 || !format.named("dns1123Subdomain").value().validate(self).hasValue()
-	// +k8s:validation:cel[1]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()[0]
+	// +k8s:validation:cel[1]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()
 	// +k8s:validation:cel[1]:reason>FieldValueInvalid
 	VolumeAttributesClassName *string `json:"volumeAttributesClassName,omitempty" protobuf:"bytes,10,opt,name=volumeAttributesClassName"`
 }
@@ -3315,11 +3315,8 @@ type NodeSelectorTerm struct {
 	// +k8s:validation:items:cel[2]:rule>self.operator == 'Gt' || self.operator == 'Lt' ? self.values.size() == 1 : true
 	// +k8s:validation:items:cel[2]:message>must be specified single value when `operator` is 'Lt' or 'Gt'
 	// +k8s:validation:items:cel[2]:reason>FieldValueRequired
-	//!TODO: Qualfiedname can return multiple errors, would it be simple to allow multiple strings to be returned for multiple errors?
 	// +k8s:validation:items:properties:key:cel[0]:rule>!format.named("qualifiedName").value().validate(self).hasValue()
-	// +k8s:validation:items:properties:key:cel[0]:messageExpression>format.named("qualifiedName").value().validate(self).value()[0]
-	// +k8s:validation:items:properties:key:cel[1]:rule>!format.named("qualifiedName").value().validate(self).hasValue() || format.named("qualifiedName").value().validate(self).value().size() < 2
-	// +k8s:validation:items:properties:key:cel[1]:messageExpression>format.named("qualifiedName").value().validate(self).value()[1]
+	// +k8s:validation:items:properties:key:cel[0]:messageExpression>format.named("qualifiedName").value().validate(self).value()
 	MatchExpressions []NodeSelectorRequirement `json:"matchExpressions,omitempty" protobuf:"bytes,1,rep,name=matchExpressions"`
 	// A list of node selector requirements by node's fields.
 	// +optional
@@ -3335,7 +3332,7 @@ type NodeSelectorTerm struct {
 	// +k8s:validation:items:cel[2]:reason>FieldValueInvalid
 	//!TODO: Use variables for name format to use here, fortunately only one is valid so we use that
 	// +k8s:validation:items:properties:values:items:cel[0]:rule>!format.named("dns1123Subdomain").value().validate(self).hasValue()
-	// +k8s:validation:items:properties:values:items:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()[0]
+	// +k8s:validation:items:properties:values:items:cel[0]:messageExpression>format.named("dns1123Subdomain").value().validate(self).value()
 	MatchFields []NodeSelectorRequirement `json:"matchFields,omitempty" protobuf:"bytes,2,rep,name=matchFields"`
 }
 
