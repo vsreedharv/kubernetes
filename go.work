@@ -35,3 +35,7 @@ use (
 	./staging/src/k8s.io/sample-cli-plugin
 	./staging/src/k8s.io/sample-controller
 )
+
+replace (
+	k8s.io/kube-openapi => github.com/alexzielenski/kube-openapi v0.0.0-20240418030445-83ad4d9b6b23
+)
