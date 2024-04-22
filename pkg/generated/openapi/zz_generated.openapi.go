@@ -29,6 +29,7 @@ import (
 	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	common "k8s.io/kube-openapi/pkg/common"
 	spec "k8s.io/kube-openapi/pkg/validation/spec"
+	ptr "k8s.io/utils/ptr"
 )
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
@@ -23022,9 +23023,15 @@ func schema_k8sio_api_core_v1_HostPathVolumeSource(ref common.ReferenceCallback)
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"path": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must not contain '..'", "rule": "self.split('/').all(e, e != \"..\")"}},
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "path of the directory on the host. If the path is a symlink, it will follow the link to the real path. More info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
 							Default:     "",
+							MinLength:   ptr.To[int64](1),
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -24481,7 +24488,8 @@ func schema_k8sio_api_core_v1_NodeSelector(ref common.ReferenceCallback) common.
 					"nodeSelectorTerms": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
+								"x-kubernetes-list-type":   "atomic",
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must have at least one node selector term", "reason": "FieldValueRequired", "rule": "self.size() > 0"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{
@@ -24577,7 +24585,39 @@ func schema_k8sio_api_core_v1_NodeSelectorTerm(ref common.ReferenceCallback) com
 						},
 						SchemaProps: spec.SchemaProps{
 							Description: "A list of node selector requirements by node's labels.",
-							Type:        []string{"array"},
+							AllOf: []spec.Schema{
+								{
+									SchemaProps: spec.SchemaProps{
+										Items: &spec.SchemaOrArray{
+											Schema: &spec.Schema{
+												SchemaProps: spec.SchemaProps{
+													AllOf: []spec.Schema{
+														{
+															SchemaProps: spec.SchemaProps{
+																Properties: map[string]spec.Schema{
+																	"key": {
+																		VendorExtensible: spec.VendorExtensible{
+																			Extensions: spec.Extensions{
+																				"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"qualifiedName\").value().validate(self).value()", "rule": "!format.named(\"qualifiedName\").value().validate(self).hasValue()"}},
+																			},
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+												VendorExtensible: spec.VendorExtensible{
+													Extensions: spec.Extensions{
+														"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must be specified when `operator` is 'In' or 'NotIn'", "reason": "FieldValueRequired", "rule": "self.operator == 'In' || self.operator == 'NotIn' ? self.values.size() > 0 : true"}, map[string]interface{}{"message": "may not be specified when `operator` is 'Exists' or 'DoesNotExist'", "reason": "FieldValueForbidden", "rule": "self.operator == 'Exists' || self.operator == 'DoesNotExist' ? self.values.size() == 0 : true"}, map[string]interface{}{"message": "must be specified single value when `operator` is 'Lt' or 'Gt'", "reason": "FieldValueRequired", "rule": "self.operator == 'Gt' || self.operator == 'Lt' ? self.values.size() == 1 : true"}},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+							Type: []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
@@ -24595,8 +24635,52 @@ func schema_k8sio_api_core_v1_NodeSelectorTerm(ref common.ReferenceCallback) com
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "A list of node selector requirements by node's fields.",
-							Type:        []string{"array"},
+							Description: "A list of node selector requirements by node's fields. !TODO: Use variables for name format to use here, fortunately only one is valid so we use that",
+							AllOf: []spec.Schema{
+								{
+									SchemaProps: spec.SchemaProps{
+										Items: &spec.SchemaOrArray{
+											Schema: &spec.Schema{
+												SchemaProps: spec.SchemaProps{
+													AllOf: []spec.Schema{
+														{
+															SchemaProps: spec.SchemaProps{
+																Properties: map[string]spec.Schema{
+																	"values": {
+																		SchemaProps: spec.SchemaProps{
+																			AllOf: []spec.Schema{
+																				{
+																					SchemaProps: spec.SchemaProps{
+																						Items: &spec.SchemaOrArray{
+																							Schema: &spec.Schema{
+																								VendorExtensible: spec.VendorExtensible{
+																									Extensions: spec.Extensions{
+																										"x-kubernetes-validations": []interface{}{map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()", "rule": "!format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
+																									},
+																								},
+																							},
+																						},
+																					},
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+												VendorExtensible: spec.VendorExtensible{
+													Extensions: spec.Extensions{
+														"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must be only one value when `operator` is 'In' or 'NotIn' for node field selector", "reason": "FieldValueRequired", "rule": "self.operator == 'In' || self.operator == 'NotIn' ? self.values.size() == 1 : true"}, map[string]interface{}{"message": "not a valid selector operator", "reason": "FieldValueInvalid", "rule": "self.operator != 'In' || self.operator == 'NotIn'"}, map[string]interface{}{"message": "not a valid field selector key", "reason": "FieldValueInvalid", "rule": "[\"metadata.name\"].exists(n, n == self.key)"}},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+							Type: []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
@@ -25122,6 +25206,11 @@ func schema_k8sio_api_core_v1_PersistentVolume(ref common.ReferenceCallback) com
 						},
 					},
 					"metadata": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".name", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.name).value()", "rule": "!has(self.name) || !format.named(\"dns1123Subdomain\").value().validate(self.name).hasValue()"}, map[string]interface{}{"fieldPath": ".namespace", "message": "not allowed on this type", "reason": "FieldValueForbidden", "rule": "!has(self.__namespace__)"}},
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
@@ -25129,6 +25218,11 @@ func schema_k8sio_api_core_v1_PersistentVolume(ref common.ReferenceCallback) com
 						},
 					},
 					"spec": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"fieldPath": ".capacity", "message": "must specify a capacity", "reason": "FieldValueRequired", "rule": "has(self.capacity) && self.capacity.size() > 0"}, map[string]interface{}{"fieldPath": ".capacity", "message": "Supported values: [\"storage\"]", "reason": "FieldValueInvalid", "rule": "has(self.capacity) && has(self.capacity.storage) && self.capacity.size() == 1"}, map[string]interface{}{"fieldPath": ".storageClassName", "messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).value()", "reason": "FieldValueInvalid", "rule": "!has(self.storageClassName) || self.storageClassName.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self.storageClassName).hasValue()"}},
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "spec defines a specification of a persistent volume owned by the cluster. Provisioned by an administrator. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#persistent-volumes",
 							Default:     map[string]interface{}{},
@@ -25795,7 +25889,23 @@ func schema_k8sio_api_core_v1_PersistentVolumeSpec(ref common.ReferenceCallback)
 					"capacity": {
 						SchemaProps: spec.SchemaProps{
 							Description: "capacity is the description of the persistent volume's resources and capacity. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#capacity",
-							Type:        []string{"object"},
+							AllOf: []spec.Schema{
+								{
+									SchemaProps: spec.SchemaProps{
+										AdditionalProperties: &spec.SchemaOrBool{
+											Allows: true,
+											Schema: &spec.Schema{
+												VendorExtensible: spec.VendorExtensible{
+													Extensions: spec.Extensions{
+														"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must be greater than zero", "rule": "quantity(self).asApproximateFloat() > 0"}},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+							Type: []string{"object"},
 							AdditionalProperties: &spec.SchemaOrBool{
 								Allows: true,
 								Schema: &spec.Schema{
@@ -25941,11 +26051,13 @@ func schema_k8sio_api_core_v1_PersistentVolumeSpec(ref common.ReferenceCallback)
 					"accessModes": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
+								"x-kubernetes-list-type":   "atomic",
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "may not use ReadWriteOncePod with other access modes", "reason": "FieldValueForbidden", "rule": "!self.exists(c, c == \"ReadWriteOncePod\") || self.size() == 1"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{
 							Description: "accessModes contains all ways the volume can be mounted. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#access-modes",
+							MinItems:    ptr.To[int64](1),
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -26020,12 +26132,23 @@ func schema_k8sio_api_core_v1_PersistentVolumeSpec(ref common.ReferenceCallback)
 						},
 					},
 					"volumeAttributesClassName": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "an empty string is disallowed", "reason": "FieldValueRequired", "rule": "self.size() > 0"}, map[string]interface{}{"messageExpression": "format.named(\"dns1123Subdomain\").value().validate(self).value()", "reason": "FieldValueInvalid", "rule": "self.size() == 0 || !format.named(\"dns1123Subdomain\").value().validate(self).hasValue()"}},
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "Name of VolumeAttributesClass to which this persistent volume belongs. Empty value is not allowed. When this field is not set, it indicates that this volume does not belong to any VolumeAttributesClass. This field is mutable and can be changed by the CSI driver after a volume has been updated successfully to a new class. For an unbound PersistentVolume, the volumeAttributesClassName will be matched with unbound PersistentVolumeClaims during the binding process. This is an alpha field and requires enabling VolumeAttributesClass feature.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
+				},
+				Required: []string{"accessModes"},
+			},
+			VendorExtensible: spec.VendorExtensible{
+				Extensions: spec.Extensions{
+					"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "must specify a volume type", "reason": "FieldValueRequired", "rule": "has(self.gcePersistentDisk)\n|| has(self.awsElasticBlockStore)\n|| has(self.hostPath)\n|| has(self.glusterfs)\n|| has(self.nfs)\n|| has(self.rbd)\n|| has(self.iscsi)\n|| has(self.cinder)\n|| has(self.cephfs)\n|| has(self.fc)\n|| has(self.flocker)\n|| has(self.flexVolume)\n|| has(self.azureFile)\n|| has(self.vsphereVolume)\n|| has(self.quobyte)\n|| has(self.azureDisk)\n|| has(self.photonPersistentDisk)\n|| has(self.portworxVolume)\n|| has(self.scaleIO)\n|| has(self.local)\n|| has(self.storageos)\n|| has(self.csi)"}, map[string]interface{}{"fieldPath": ".persistentVolumeReclaimPolicy", "message": "may not be 'recycle' for a hostPath mount of '/'", "reason": "FieldValueForbidden", "rule": "!has(self.hostPath) || self.hostPath.path != \"/\" || self.persistentVolumeReclaimPolicy != \"Recycle\""}, map[string]interface{}{"fieldPath": ".csi", "message": "has to be specified when using volumeAttributesClassName", "reason": "FieldValueRequired", "rule": "has(self.csi) || !has(self.volumeAttributesClassName)"}},
 				},
 			},
 		},
@@ -31625,6 +31748,7 @@ func schema_k8sio_api_core_v1_VolumeNodeAffinity(ref common.ReferenceCallback) c
 						},
 					},
 				},
+				Required: []string{"required"},
 			},
 		},
 		Dependencies: []string{

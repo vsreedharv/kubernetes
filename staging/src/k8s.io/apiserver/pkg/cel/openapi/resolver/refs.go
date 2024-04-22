@@ -60,6 +60,38 @@ func populateRefs(schemaOf func(ref string) (*spec.Schema, bool), visited sets.S
 			return nil, fmt.Errorf("internal error: cannot resolve Ref %q: %w", ref, ErrSchemaNotFound)
 		}
 		result = *resolved
+
+		// Preserve x- extensions and defaults
+		//!TODO: Discuss a principled way to resolve refs while keeping field-level
+		// validations.
+		newExtensions := make(spec.Extensions, len(schema.Extensions)+len(resolved.Extensions))
+		for k, v := range resolved.Extensions {
+			newExtensions[k] = v
+		}
+		for k, v := range schema.Extensions {
+			if original, ok := newExtensions[k]; ok {
+				// If the extension is already present, we need to merge the values.
+				// This is a bit of a hack, but it's the best we can do without a
+				// principled way to merge extensions.
+				if ar, ok := original.([]interface{}); ok {
+					// Clone original to avoid modifying the original schema.
+					ar = append([]interface{}{}, ar...)
+
+					if br, ok := v.([]interface{}); ok {
+						newExtensions[k] = append(ar, br...)
+					} else {
+						newExtensions[k] = append(ar, v)
+					}
+				} else {
+					newExtensions[k] = v
+				}
+
+			} else {
+				newExtensions[k] = v
+			}
+		}
+		result.Extensions = newExtensions
+
 		changed = true
 	}
 	// schema is an object, populate its properties and additionalProperties

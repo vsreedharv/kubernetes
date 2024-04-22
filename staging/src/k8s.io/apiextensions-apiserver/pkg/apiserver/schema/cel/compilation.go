@@ -253,7 +253,9 @@ func compileRule(s *schema.Structural, rule apiextensions.ValidationRule, envSet
 			compilationResult.MessageExpressionError = &apiservercel.Error{Type: apiservercel.ErrorTypeInvalid, Detail: "messageExpression compilation failed: " + issues.String()}
 			return
 		}
-		if ast.OutputType() != cel.StringType {
+		outputType := ast.OutputType()
+
+		if outputType != cel.StringType && !outputType.IsEquivalentType(cel.ListType(cel.StringType)) {
 			compilationResult.MessageExpressionError = &apiservercel.Error{Type: apiservercel.ErrorTypeInvalid, Detail: "messageExpression must evaluate to a string"}
 			return
 		}
