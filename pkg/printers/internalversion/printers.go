@@ -899,6 +899,11 @@ func printPod(pod *api.Pod, options printers.GenerateOptions) ([]metav1.TableRow
 	for i, cs := range pod.Status.InitContainerStatuses {
 		initContainer := initContainers[cs.Name]
 
+		if initContainer == nil {
+			// This is a container that was not in the pod spec, so we don't count it.
+			continue
+		}
+
 		restarts += int(cs.RestartCount)
 		if cs.LastTerminationState.Terminated != nil {
 			terminatedDate := cs.LastTerminationState.Terminated.FinishedAt
@@ -954,6 +959,11 @@ func printPod(pod *api.Pod, options printers.GenerateOptions) ([]metav1.TableRow
 			cs := pod.Status.ContainerStatuses[i]
 
 			container := containers[cs.Name]
+			if container == nil {
+				// This is a container that was not in the pod spec, so we don't count it.
+				continue
+			}
+
 			restarts += int(cs.RestartCount)
 			if cs.LastTerminationState.Terminated != nil {
 				terminatedDate := cs.LastTerminationState.Terminated.FinishedAt
