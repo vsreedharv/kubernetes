@@ -228,6 +228,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
 					"/metrics", "/metrics/slis",
 					"/livez", "/readyz", "/healthz",
 					"/livez/*", "/readyz/*", "/healthz/*",
+					"/statusz",
 				).RuleOrDie(),
 			},
 		},
