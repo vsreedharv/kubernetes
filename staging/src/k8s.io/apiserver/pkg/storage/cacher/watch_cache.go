@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -154,6 +155,8 @@ type watchCache struct {
 	// Requests progress notification if there are requests waiting for watch
 	// to be fresh
 	waitingUntilFresh *conditionalProgressRequester
+
+	continueCache *continueCache
 }
 
 func newWatchCache(
@@ -182,7 +185,11 @@ func newWatchCache(
 		versioner:           versioner,
 		groupResource:       groupResource,
 		waitingUntilFresh:   progressRequester,
+		continueCache:       newContinueCache(),
 	}
+
+	wc.store = newThreadedBtreeStoreIndexer(storeElementIndexers(indexers), 32)
+
 	metrics.WatchCacheCapacity.WithLabelValues(groupResource.String()).Set(float64(wc.capacity))
 	wc.cond = sync.NewCond(wc.RLocker())
 	wc.indexValidator = wc.isIndexValidLocked
@@ -307,6 +314,8 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 func (w *watchCache) updateCache(event *watchCacheEvent) {
 	w.resizeCacheLocked(event.RecordTime)
 	if w.isCacheFullLocked() {
+		oldestRV := w.cache[w.startIndex%w.capacity].ResourceVersion
+		w.continueCache.Cleanup(oldestRV)
 		// Cache is full - remove the oldest element.
 		w.startIndex++
 		w.removedEventSinceRelist = true
@@ -450,25 +459,9 @@ func (s sortableStoreElements) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-// WaitUntilFreshAndList returns list of pointers to `storeElement` objects along
-// with their ResourceVersion and the name of the index, if any, that was used.
-func (w *watchCache) WaitUntilFreshAndList(ctx context.Context, resourceVersion uint64, key string, matchValues []storage.MatchValue) ([]interface{}, uint64, string, error) {
-	result, rv, index, filteredAndOrdered, err := w.waitUntilFreshAndListItems(ctx, resourceVersion, key, matchValues)
-	if err != nil {
-		return nil, 0, "", err
-	}
-	if !filteredAndOrdered {
-		result, err = filterPrefix(key, result)
-		if err != nil {
-			return nil, 0, "", err
-		}
-		sort.Sort(sortableStoreElements(result))
-	}
-	return result, rv, index, nil
-}
-
-func (w *watchCache) waitUntilFreshAndListItems(ctx context.Context, resourceVersion uint64, key string, matchValues []storage.MatchValue) (result []interface{}, rv uint64, index string, filteredAndOrdered bool, err error) {
+func (w *watchCache) WaitUntilFreshAndList(ctx context.Context, resourceVersion uint64, key string, opts storage.ListOptions, matchValues []storage.MatchValue) (ListItems, uint64, string, error) {
 	requestWatchProgressSupported := etcdfeature.DefaultFeatureSupportChecker.Supports(storage.RequestWatchProgress)
+	var err error
 	if utilfeature.DefaultFeatureGate.Enabled(features.ConsistentListFromCache) && requestWatchProgressSupported && w.notFresh(resourceVersion) {
 		w.waitingUntilFresh.Add()
 		err = w.waitUntilFreshAndBlock(ctx, resourceVersion)
@@ -479,27 +472,137 @@ func (w *watchCache) waitUntilFreshAndListItems(ctx context.Context, resourceVer
 
 	defer w.RUnlock()
 	if err != nil {
-		return result, rv, index, false, err
+		return ListItems{}, 0, "", err
 	}
-
-	result, rv, index, filteredAndOrdered, err = func() ([]interface{}, uint64, string, bool, error) {
+	nonEmptyResourceVersion := len(opts.ResourceVersion) > 0 && opts.ResourceVersion != "0"
+	isLegacyResourceVersionMatchExact := opts.ResourceVersionMatch == "" && opts.Predicate.Limit > 0 && nonEmptyResourceVersion
+	switch {
+	case opts.ResourceVersionMatch == metav1.ResourceVersionMatchExact || isLegacyResourceVersionMatchExact:
+		store, ok := w.continueCache.Get(resourceVersion)
+		if !ok {
+			err = errors.NewResourceExpired(fmt.Sprintf("too old resource version: %d", resourceVersion))
+			return ListItems{}, 0, "", err
+		}
+		return paginatedRead(store, key, "", opts), resourceVersion, "", nil
+	case opts.ResourceVersionMatch != "" && opts.ResourceVersionMatch != metav1.ResourceVersionMatchNotOlderThan:
+		return ListItems{}, 0, "", fmt.Errorf("unsupported")
+	case len(opts.Predicate.Continue) > 0:
+		continueKey, continueRV, err := storage.DecodeContinue(opts.Predicate.Continue, key)
+		if err != nil {
+			return ListItems{}, 0, "", errors.NewBadRequest(fmt.Sprintf("invalid continue token: %v", err))
+		}
+		if nonEmptyResourceVersion {
+			return ListItems{}, 0, "", errors.NewBadRequest("specifying resource version is not allowed when using continue")
+		}
+		store, ok := w.continueCache.Get(uint64(continueRV))
+		if !ok {
+			err = errors.NewResourceExpired(fmt.Sprintf("too old resource version: %d", continueRV))
+			return ListItems{}, 0, "", err
+		}
+		return paginatedRead(store, key, continueKey, opts), uint64(continueRV), "", nil
+	default:
+		orderedStore, ordered := w.store.(orderedLister)
+		if opts.Predicate.Limit > 0 && ordered {
+			w.continueCache.Set(w.resourceVersion, orderedStore)
+		}
 		// This isn't the place where we do "final filtering" - only some "prefiltering" is happening here. So the only
 		// requirement here is to NOT miss anything that should be returned. We can return as many non-matching items as we
 		// want - they will be filtered out later. The fact that we return less things is only further performance improvement.
 		// TODO: if multiple indexes match, return the one with the fewest items, so as to do as much filtering as possible.
 		for _, matchValue := range matchValues {
 			if result, err := w.store.ByIndex(matchValue.IndexName, matchValue.Value); err == nil {
-				return result, w.resourceVersion, matchValue.IndexName, false, nil
+				result, err = filterPrefix(key, result)
+				if err != nil {
+					return ListItems{}, 0, "", err
+				}
+				sort.Sort(sortableStoreElements(result))
+				return ListItems{
+					Items:     result,
+					HasMore:   false,
+					ItemCount: int64(len(result)),
+				}, w.resourceVersion, matchValue.IndexName, nil
 			}
 		}
-		if store, ok := w.store.(orderedLister); ok {
-			result, _ := store.ListPrefix(key, "", 0)
-			return result, w.resourceVersion, "", true, nil
+		if ordered {
+			return paginatedRead(orderedStore, key, "", opts), w.resourceVersion, "", nil
 		}
-		return w.store.List(), w.resourceVersion, "", false, nil
-	}()
+		result := w.store.List()
+		result, err = filterPrefix(key, result)
+		if err != nil {
+			return ListItems{}, 0, "", err
+		}
+		sort.Sort(sortableStoreElements(result))
+		return ListItems{
+			Items:     result,
+			HasMore:   false,
+			ItemCount: int64(len(result)),
+		}, w.resourceVersion, "", nil
+	}
+}
 
-	return result, rv, index, filteredAndOrdered, err
+type ListResp struct {
+	objs    []interface{}
+	hasMore bool
+}
+
+func paginatedRead(store orderedLister, key, continueKey string, opts storage.ListOptions) ListItems {
+	// TODO: Implement using indexes
+	listLimit := int(computeListLimit(opts))
+	readLimit := listLimit
+	allItems := make([]interface{}, 0, listLimit)
+	var moreInFilter bool
+	for {
+		items, moreInStore := store.ListPrefix(key, continueKey, readLimit)
+		if opts.Predicate.Empty() {
+			// Need to provide accurate ItemCount for empty predicate
+			itemCount := len(items)
+			if listLimit > 0 {
+				itemCount = store.Count(key, continueKey)
+			}
+			return ListItems{
+				Items:     items,
+				HasMore:   moreInStore,
+				ItemCount: int64(itemCount),
+			}
+		}
+		if listLimit <= 0 {
+			return ListItems{
+				Items:   items,
+				HasMore: moreInStore,
+			}
+		}
+		items, moreInFilter = filterUpToLimit(items, listLimit-len(allItems), opts.Predicate)
+		// TODO: Get continuation token before filtering.
+		if len(items) > 0 {
+			continueKey = items[len(items)-1].(*storeElement).Key + "\x00"
+		}
+		allItems = append(allItems, items...)
+		if !moreInStore || len(allItems) >= listLimit {
+			return ListItems{
+				Items:   allItems,
+				HasMore: moreInStore || moreInFilter,
+			}
+		}
+		readLimit *= 2
+	}
+}
+
+func filterUpToLimit(items []interface{}, limit int, pred storage.SelectionPredicate) (matchedItems []interface{}, hasMore bool) {
+	matchedItems = make([]interface{}, 0, limit)
+	for _, obj := range items {
+		elem := obj.(*storeElement)
+		if !pred.MatchesObjectAttributes(elem.Labels, elem.Fields) {
+			continue
+		}
+		// TODO: Might be worth to lookup one more item to provide more accurate HasMore.
+		if len(matchedItems) < limit {
+			matchedItems = append(matchedItems, obj)
+		} else {
+			hasMore = true
+			return matchedItems, hasMore
+		}
+	}
+	return matchedItems, hasMore
 }
 
 func filterPrefix(prefix string, items []interface{}) ([]interface{}, error) {
