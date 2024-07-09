@@ -42,6 +42,21 @@ func PodConditionByKubelet(conditionType v1.PodConditionType) bool {
 			return true
 		}
 	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodPendingTerminationConditions) {
+		if conditionType == v1.PendingTermination {
+			return true
+		}
+	}
+	return false
+}
+
+// PodConditionAndReasonByKubelet returns if the pod condition type and reason is shared by kubelet
+func PodConditionAndReasonByKubelet(conditionType v1.PodConditionType, reason string) bool {
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodDisruptionConditions) {
+		if conditionType == v1.DisruptionTarget && reason == v1.PodReasonTerminationByKubelet {
+			return true
+		}
+	}
 	return false
 }
 

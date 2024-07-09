@@ -572,6 +572,19 @@ const (
 	// the pod is being deleted due to a disruption.
 	PodDisruptionConditions featuregate.Feature = "PodDisruptionConditions"
 
+	// beta: v1.31
+	//
+	// Pods with the DisruptionTarget condition are removed from Endpoints and EndpointSlices
+	// early (like when deletionTimestamp is set) to minimize disruption to service consumers.
+	PodDisruptionConditionSignalsTerminating featuregate.Feature = "PodDisruptionConditionSignalsTerminating"
+
+	// owner: @smarterclayton
+	// kep: ...
+	//
+	// Enables support for setting a pod condition on the node when we will
+	// be terminating a pod outside of the normal lifecycle.
+	PodPendingTerminationConditions featuregate.Feature = "PodPendingTerminationConditions"
+
 	// owner: @danielvegamyhre
 	// kep: https://kep.k8s.io/4017
 	// beta: v1.28
@@ -1118,6 +1131,10 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	PodDeletionCost: {Default: true, PreRelease: featuregate.Beta},
 
 	PodDisruptionConditions: {Default: true, PreRelease: featuregate.Beta},
+
+	PodDisruptionConditionSignalsTerminating: {Default: true, PreRelease: featuregate.Beta},
+
+	PodPendingTerminationConditions: {Default: false, PreRelease: featuregate.Alpha},
 
 	PodReadyToStartContainersCondition: {Default: true, PreRelease: featuregate.Beta},
 
