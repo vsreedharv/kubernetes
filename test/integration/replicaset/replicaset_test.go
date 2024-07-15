@@ -217,7 +217,7 @@ func waitForTerminatingPods(clientSet clientset.Interface, ctx context.Context, 
 		}
 		return newRS.Status.TerminatingReplicas == terminatingPods, nil
 	}); err != nil {
-		return fmt.Errorf("failed to verify .Status.TerminatingPods is equal to %d for replicaset %q: %v", terminatingPods, rs.Name, err)
+		return fmt.Errorf("failed to verify .Status.TerminatingPods is equal to %d for replicaset %q: %w", terminatingPods, rs.Name, err)
 	}
 	return nil
 }
