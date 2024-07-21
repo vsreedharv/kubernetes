@@ -36,6 +36,10 @@ func Convert_config_KubeProxyConfiguration_To_v1alpha1_KubeProxyConfiguration(in
 	default:
 		out.IPTables.MasqueradeAll = in.Linux.MasqueradeAll
 	}
+
+	if len(in.NodeIPOverride) > 0 {
+		out.BindAddress = in.NodeIPOverride[0]
+	}
 	return nil
 }
 
@@ -52,6 +56,10 @@ func Convert_v1alpha1_KubeProxyConfiguration_To_config_KubeProxyConfiguration(in
 		out.Linux.MasqueradeAll = in.NFTables.MasqueradeAll
 	default:
 		out.Linux.MasqueradeAll = in.IPTables.MasqueradeAll
+	}
+
+	if len(in.BindAddress) > 0 {
+		out.NodeIPOverride = []string{in.BindAddress}
 	}
 	return nil
 }
