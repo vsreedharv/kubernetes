@@ -964,7 +964,7 @@ func printPod(pod *api.Pod, options printers.GenerateOptions) ([]metav1.TableRow
 				}
 			}
 			switch {
-			case container.State.Waiting != nil && len(container.State.Waiting.Reason) > 0:
+			case container.State.Waiting != nil && container.State.Waiting.Reason != "":
 				reason = container.State.Waiting.Reason
 			case container.State.Terminated != nil:
 				if len(container.State.Terminated.Reason) > 0 {
