@@ -127,8 +127,8 @@ func TestPersistentVolumeRecycler(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go ctrl.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, ctrl, informers)
+	defer stopControllers()
 
 	// This PV will be claimed, released, and recycled.
 	pv := createPV("fake-pv-recycler", "/tmp/foo", "10G", []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, v1.PersistentVolumeReclaimRecycle)
@@ -183,8 +183,8 @@ func TestPersistentVolumeDeleter(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go ctrl.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, ctrl, informers)
+	defer stopControllers()
 
 	// This PV will be claimed, released, and deleted.
 	pv := createPV("fake-pv-deleter", "/tmp/foo", "10G", []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, v1.PersistentVolumeReclaimDelete)
@@ -244,8 +244,8 @@ func TestPersistentVolumeBindRace(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go ctrl.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, ctrl, informers)
+	defer stopControllers()
 
 	pv := createPV("fake-pv-race", "/tmp/foo", "10G", []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, v1.PersistentVolumeReclaimRetain)
 	pvc := createPVC("fake-pvc-race", ns.Name, "5G", []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce}, "")
@@ -315,8 +315,8 @@ func TestPersistentVolumeClaimLabelSelector(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go controller.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, controller, informers)
+	defer stopControllers()
 
 	var (
 		err     error
@@ -397,8 +397,8 @@ func TestPersistentVolumeClaimLabelSelectorMatchExpressions(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go controller.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, controller, informers)
+	defer stopControllers()
 
 	var (
 		err     error
@@ -498,8 +498,8 @@ func TestPersistentVolumeMultiPVs(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go controller.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, controller, informers)
+	defer stopControllers()
 
 	maxPVs := getObjectCount()
 	pvs := make([]*v1.PersistentVolume, maxPVs)
@@ -589,8 +589,8 @@ func TestPersistentVolumeMultiPVsPVCs(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go binder.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, binder, informers)
+	defer stopControllers()
 
 	objCount := getObjectCount()
 	pvs := make([]*v1.PersistentVolume, objCount)
@@ -802,9 +802,8 @@ func TestPersistentVolumeControllerStartup(t *testing.T) {
 		waitForAnyPersistentVolumePhase(watchPV, v1.VolumeBound)
 	}
 
-	// Start the controller when all PVs and PVCs are already saved in etcd
-	informers.Start(tCtx.Done())
-	go binder.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, binder, informers)
+	defer stopControllers()
 
 	// wait for at least two sync periods for changes. No volume should be
 	// Released and no claim should be Lost during this time.
@@ -892,8 +891,8 @@ func TestPersistentVolumeProvisionMultiPVCs(t *testing.T) {
 	}
 	testClient.StorageV1().StorageClasses().Create(context.TODO(), &storageClass, metav1.CreateOptions{})
 
-	informers.Start(tCtx.Done())
-	go binder.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, binder, informers)
+	defer stopControllers()
 
 	objCount := getObjectCount()
 	pvcs := make([]*v1.PersistentVolumeClaim, objCount)
@@ -976,8 +975,8 @@ func TestPersistentVolumeMultiPVsDiffAccessModes(t *testing.T) {
 	// non-namespaced objects (PersistenceVolumes).
 	defer testClient.CoreV1().PersistentVolumes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 
-	informers.Start(tCtx.Done())
-	go controller.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, controller, informers)
+	defer stopControllers()
 
 	// This PV will be claimed, released, and deleted
 	pvRwo := createPV("pv-rwo", "/tmp/foo", "10G",
@@ -1080,8 +1079,8 @@ func TestRetroactiveStorageClassAssignment(t *testing.T) {
 		t.Errorf("Failed to create a storage class: %v", err)
 	}
 
-	informers.Start(tCtx.Done())
-	go binder.Run(tCtx)
+	stopControllers := runControllerAndInformers(tCtx, binder, informers)
+	defer stopControllers()
 
 	klog.V(2).Infof("TestRetroactiveStorageClassAssignment: start")
 
@@ -1324,6 +1323,14 @@ func waitForPersistentVolumeClaimStorageClass(t *testing.T, claimName, scName st
 		}
 
 	}
+}
+
+func runControllerAndInformers(ctx context.Context, pc *persistentvolumecontroller.PersistentVolumeController, informers informers.SharedInformerFactory) context.CancelFunc {
+	ctx, cancel := context.WithCancel(ctx)
+	informers.Start(ctx.Done())
+	informers.WaitForCacheSync(ctx.Done())
+	go pc.Run(ctx)
+	return cancel
 }
 
 func createClients(ctx context.Context, namespaceName string, t *testing.T, s *kubeapiservertesting.TestServer, syncPeriod time.Duration) (*clientset.Clientset, *persistentvolumecontroller.PersistentVolumeController, informers.SharedInformerFactory, watch.Interface, watch.Interface) {
