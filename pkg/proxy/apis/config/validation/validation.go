@@ -62,8 +62,8 @@ func Validate(config *kubeproxyconfig.KubeProxyConfiguration) field.ErrorList {
 		allErrs = append(allErrs, field.Invalid(newPath.Child("ConfigSyncPeriod"), config.ConfigSyncPeriod, "must be greater than 0"))
 	}
 
-	if netutils.ParseIPSloppy(config.BindAddress) == nil {
-		allErrs = append(allErrs, field.Invalid(newPath.Child("BindAddress"), config.BindAddress, "not a valid textual representation of an IP address"))
+	if len(config.NodeIPOverride) > 0 {
+		allErrs = append(allErrs, validateDualStackIPStrings(config.NodeIPOverride, newPath.Child("NodeIPOverride"))...)
 	}
 
 	if config.HealthzBindAddress != "" {
@@ -363,6 +363,29 @@ func validateInterface(iface string, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 	if len(iface) == 0 {
 		allErrs = append(allErrs, field.Invalid(fldPath, iface, "must not be empty"))
+	}
+	return allErrs
+}
+
+func validateDualStackIPStrings(ipStrings []string, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	switch {
+	case len(ipStrings) == 0:
+		allErrs = append(allErrs, field.Invalid(fldPath, ipStrings, "must contain at least one IP"))
+	case len(ipStrings) > 2:
+		allErrs = append(allErrs, field.Invalid(fldPath, ipStrings, "must be a either a single IP or dual-stack pair of IPs (e.g. [10.100.0.0, fde4:8dba:82e1::])"))
+	default:
+		for i, ipString := range ipStrings {
+			if netutils.ParseIPSloppy(ipString) == nil {
+				allErrs = append(allErrs, field.Invalid(fldPath.Index(i), ipString, "must be a valid IP (e.g. 10.100.0.0 or fde4:8dba:82e1::)"))
+			}
+		}
+		if len(ipStrings) == 2 {
+			ifDualStack, err := netutils.IsDualStackIPStrings(ipStrings)
+			if err == nil && !ifDualStack {
+				allErrs = append(allErrs, field.Invalid(fldPath, ipStrings, "must be a either a single IP or dual-stack pair of IPs (e.g. [10.100.0.0, fde4:8dba:82e1::])"))
+			}
+		}
 	}
 	return allErrs
 }

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"reflect"
 	"testing"
 	"time"
 
@@ -186,7 +187,6 @@ nodePortAddresses:
 				expBindAddr = expBindAddr[1 : len(tc.bindAddress)-1]
 			}
 			expected := &kubeproxyconfig.KubeProxyConfiguration{
-				BindAddress: expBindAddr,
 				ClientConnection: componentbaseconfig.ClientConnectionConfiguration{
 					AcceptContentTypes: "abc",
 					Burst:              100,
@@ -228,6 +228,7 @@ nodePortAddresses:
 				MetricsBindAddress: tc.metricsBindAddress,
 				Mode:               kubeproxyconfig.ProxyMode(tc.mode),
 				PortRange:          "2-7",
+				NodeIPOverride:     []string{expBindAddr},
 				NodePortAddresses:  []string{"10.20.30.40/16", "fd00:1::0/64"},
 				DetectLocalMode:    kubeproxyconfig.LocalModeClusterCIDR,
 				DetectLocal: kubeproxyconfig.DetectLocalConfiguration{
@@ -373,6 +374,35 @@ func TestProcessHostnameOverrideFlag(t *testing.T) {
 					t.Fatalf("expected hostname: %s, but got: %s", tc.expectedHostname, options.config.HostnameOverride)
 				}
 			}
+		})
+	}
+}
+
+// TestProcessV1Alpha1Flags tests processing v1alpha1 flags.
+func TestProcessV1Alpha1Flags(t *testing.T) {
+	testCases := []struct {
+		name     string
+		flags    []string
+		validate func(*kubeproxyconfig.KubeProxyConfiguration) bool
+	}{
+		{
+			name: "bind address",
+			flags: []string{
+				"--bind-address=0.0.0.0",
+			},
+			validate: func(config *kubeproxyconfig.KubeProxyConfiguration) bool {
+				return reflect.DeepEqual(config.NodeIPOverride, []string{"0.0.0.0"})
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			options := NewOptions()
+			fs := new(pflag.FlagSet)
+			options.AddFlags(fs)
+			require.NoError(t, fs.Parse(tc.flags))
+			options.processV1Alpha1Flags(fs)
+			require.True(t, tc.validate(options.config))
 		})
 	}
 }
