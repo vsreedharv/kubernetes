@@ -1,4 +1,4 @@
-# Do not edit, downloaded from https://github.com/kubernetes-csi/external-resizer/raw/v1.11.1/deploy/kubernetes//rbac.yaml
+# Do not edit, downloaded from https://github.com/kubernetes-csi/external-resizer/raw/v1.11.2/deploy/kubernetes//rbac.yaml
 # for csi-driver-host-path release-1.14
 # by ./update-hostpath.sh
 #
