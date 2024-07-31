@@ -20,7 +20,7 @@ package events
 const (
 	CreatedContainer        = "Created"
 	StartedContainer        = "Started"
-	RestartedContainer      = "ContainerExited"
+	RestartedContainer      = "Restarted"
 	FailedToCreateContainer = "Failed"
 	FailedToStartContainer  = "Failed"
 	KillingContainer        = "Killing"
