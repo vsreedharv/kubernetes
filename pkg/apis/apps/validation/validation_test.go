@@ -822,6 +822,8 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 		errs   field.ErrorList
 	}
 
+	const enableUpdateVolumeClaimTemplate = "[enable UpdateVolumeClaimTemplate]"
+
 	successCases := []testCase{{
 		name:   "update replica count",
 		old:    mkStatefulSet(&validPodTemplate),
@@ -873,6 +875,10 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 		name:   "update existing instance with .spec.ordinals.start",
 		old:    mkStatefulSet(&validPodTemplate),
 		update: mkStatefulSet(&validPodTemplate, tweakOrdinalsStart(3)),
+	}, {
+		name:   "update pvc template size " + enableUpdateVolumeClaimTemplate,
+		old:    mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate)),
+		update: mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplateChangedSize)),
 	},
 	}
 
@@ -935,7 +941,21 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 			field.Invalid(field.NewPath("spec", "volumeClaimTemplates"), nil, ""),
 		},
 	}, {
+		name:   "update pvc template storage class " + enableUpdateVolumeClaimTemplate,
+		old:    mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate)),
+		update: mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplateChangedClass)),
+		errs: field.ErrorList{
+			field.Invalid(field.NewPath("spec", "volumeClaimTemplates").Index(0), nil, ""),
+		},
+	}, {
 		name:   "add new pvc template",
+		old:    mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate)),
+		update: mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate, validPVCTemplate2)),
+		errs: field.ErrorList{
+			field.Invalid(field.NewPath("spec", "volumeClaimTemplates"), nil, ""),
+		},
+	}, {
+		name:   "add new pvc template " + enableUpdateVolumeClaimTemplate,
 		old:    mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate)),
 		update: mkStatefulSet(&validPodTemplate, tweakPVCTemplate(validPVCTemplate, validPVCTemplate2)),
 		errs: field.ErrorList{
@@ -959,6 +979,8 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 		}
 
 		t.Run(testTitle, func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.UpdateVolumeClaimTemplate,
+				strings.Contains(name, enableUpdateVolumeClaimTemplate))
 			testCase.old.ObjectMeta.ResourceVersion = "1"
 			testCase.update.ObjectMeta.ResourceVersion = "1"
 
