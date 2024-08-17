@@ -88,6 +88,12 @@ const (
 	AuthorizeWithSelectors featuregate.Feature = "AuthorizeWithSelectors"
 
 	// owner: @serathius
+	// beta: v1.32
+	//
+	// Replaces watch cache hashmap implementation with a btree based one, bringing performance improvements.
+	BtreeWatchCache featuregate.Feature = "BtreeWatchCache"
+
+	// owner: @serathius
 	// Enables concurrent watch object decoding to avoid starving watch cache when conversion webhook is installed.
 	ConcurrentWatchObjectDecode featuregate.Feature = "ConcurrentWatchObjectDecode"
 
@@ -404,6 +410,9 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	ZeroLimitedNominalConcurrencyShares: {
 		{Version: version.MustParse("1.29"), Default: false, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.30"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
+	},
+	BtreeWatchCache: {
+		{Version: version.MustParse("1.32"), Default: true, PreRelease: featuregate.Beta},
 	},
 }
 

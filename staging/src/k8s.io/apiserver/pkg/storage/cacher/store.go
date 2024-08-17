@@ -24,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiserver/pkg/features"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -39,8 +41,16 @@ type storeIndexer interface {
 	ByIndex(indexName, indexedValue string) ([]interface{}, error)
 }
 
+type orderedLister interface {
+	ListPrefix(prefix, continueKey string, limit int) (items []interface{}, hasMore bool)
+}
+
 func newStoreIndexer(indexers *cache.Indexers) storeIndexer {
-	return cache.NewIndexer(storeElementKey, storeElementIndexers(indexers))
+	if utilfeature.DefaultFeatureGate.Enabled(features.BtreeWatchCache) {
+		return newThreadedBtreeStoreIndexer(storeElementIndexers(indexers), 32)
+	} else {
+		return cache.NewIndexer(storeElementKey, storeElementIndexers(indexers))
+	}
 }
 
 // Computing a key of an object is generally non-trivial (it performs

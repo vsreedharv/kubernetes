@@ -453,19 +453,21 @@ func (s sortableStoreElements) Swap(i, j int) {
 // WaitUntilFreshAndList returns list of pointers to `storeElement` objects along
 // with their ResourceVersion and the name of the index, if any, that was used.
 func (w *watchCache) WaitUntilFreshAndList(ctx context.Context, resourceVersion uint64, key string, matchValues []storage.MatchValue) ([]interface{}, uint64, string, error) {
-	items, rv, index, err := w.waitUntilFreshAndListItems(ctx, resourceVersion, key, matchValues)
+	result, rv, index, filteredAndOrdered, err := w.waitUntilFreshAndListItems(ctx, resourceVersion, key, matchValues)
 	if err != nil {
 		return nil, 0, "", err
 	}
-	result, err := filterPrefix(key, items)
-	if err != nil {
-		return nil, 0, "", err
+	if !filteredAndOrdered {
+		result, err = filterPrefix(key, result)
+		if err != nil {
+			return nil, 0, "", err
+		}
+		sort.Sort(sortableStoreElements(result))
 	}
-	sort.Sort(sortableStoreElements(result))
 	return result, rv, index, nil
 }
 
-func (w *watchCache) waitUntilFreshAndListItems(ctx context.Context, resourceVersion uint64, key string, matchValues []storage.MatchValue) (result []interface{}, rv uint64, index string, err error) {
+func (w *watchCache) waitUntilFreshAndListItems(ctx context.Context, resourceVersion uint64, key string, matchValues []storage.MatchValue) (result []interface{}, rv uint64, index string, filteredAndOrdered bool, err error) {
 	requestWatchProgressSupported := etcdfeature.DefaultFeatureSupportChecker.Supports(storage.RequestWatchProgress)
 	if utilfeature.DefaultFeatureGate.Enabled(features.ConsistentListFromCache) && requestWatchProgressSupported && w.notFresh(resourceVersion) {
 		w.waitingUntilFresh.Add()
@@ -477,23 +479,27 @@ func (w *watchCache) waitUntilFreshAndListItems(ctx context.Context, resourceVer
 
 	defer w.RUnlock()
 	if err != nil {
-		return result, rv, index, err
+		return result, rv, index, false, err
 	}
 
-	result, rv, index, err = func() ([]interface{}, uint64, string, error) {
+	result, rv, index, filteredAndOrdered, err = func() ([]interface{}, uint64, string, bool, error) {
 		// This isn't the place where we do "final filtering" - only some "prefiltering" is happening here. So the only
 		// requirement here is to NOT miss anything that should be returned. We can return as many non-matching items as we
 		// want - they will be filtered out later. The fact that we return less things is only further performance improvement.
 		// TODO: if multiple indexes match, return the one with the fewest items, so as to do as much filtering as possible.
 		for _, matchValue := range matchValues {
 			if result, err := w.store.ByIndex(matchValue.IndexName, matchValue.Value); err == nil {
-				return result, w.resourceVersion, matchValue.IndexName, nil
+				return result, w.resourceVersion, matchValue.IndexName, false, nil
 			}
 		}
-		return w.store.List(), w.resourceVersion, "", nil
+		if store, ok := w.store.(orderedLister); ok {
+			result, _ := store.ListPrefix(key, "", 0)
+			return result, w.resourceVersion, "", true, nil
+		}
+		return w.store.List(), w.resourceVersion, "", false, nil
 	}()
 
-	return result, rv, index, err
+	return result, rv, index, filteredAndOrdered, err
 }
 
 func filterPrefix(prefix string, items []interface{}) ([]interface{}, error) {
