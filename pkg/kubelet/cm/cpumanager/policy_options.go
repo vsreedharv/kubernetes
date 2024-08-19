@@ -33,7 +33,7 @@ const (
 	DistributeCPUsAcrossNUMAOption  string = "distribute-cpus-across-numa"
 	AlignBySocketOption             string = "align-by-socket"
 	DistributeCPUsAcrossCoresOption string = "distribute-cpus-across-cores"
-	AlignByUnCoreCacheOption        string = "align-cpus-by-uncorecache"
+	PreferAlignByUnCoreCacheOption  string = "prefer-align-cpus-by-uncorecache"
 )
 
 var (
@@ -41,10 +41,10 @@ var (
 		DistributeCPUsAcrossNUMAOption,
 		AlignBySocketOption,
 		DistributeCPUsAcrossCoresOption,
+		PreferAlignByUnCoreCacheOption,
 	)
 	betaOptions = sets.New[string](
 		FullPCPUsOnlyOption,
-		AlignByUnCoreCacheOption,
 	)
 	stableOptions = sets.New[string]()
 )
@@ -90,7 +90,7 @@ type StaticPolicyOptions struct {
 	DistributeCPUsAcrossCores bool
 	// Flag that makes best-effort to align CPUs to a L3 or uncorecache boundary
 	// As long as there are CPUs available, pods will be admitted if the condition is not met.
-	AlignByUnCoreCacheOption bool
+	PreferAlignByUnCoreCacheOption bool
 }
 
 // NewStaticPolicyOptions creates a StaticPolicyOptions struct from the user configuration.
@@ -126,12 +126,12 @@ func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOption
 				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
 			}
 			opts.DistributeCPUsAcrossCores = optValue
-		case AlignByUnCoreCacheOption:
+		case PreferAlignByUnCoreCacheOption:
 			optValue, err := strconv.ParseBool(value)
 			if err != nil {
 				return opts, fmt.Errorf("bad value for option %q: %w", name, err)
 			}
-			opts.AlignByUnCoreCacheOption = optValue
+			opts.PreferAlignByUnCoreCacheOption = optValue
 		default:
 			// this should never be reached, we already detect unknown options,
 			// but we keep it as further safety.
@@ -148,8 +148,12 @@ func NewStaticPolicyOptions(policyOptions map[string]string) (StaticPolicyOption
 		return opts, fmt.Errorf("static policy options %s and %s can not be used at the same time", DistributeCPUsAcrossNUMAOption, DistributeCPUsAcrossCoresOption)
 	}
 
-	if opts.AlignByUnCoreCacheOption && opts.DistributeCPUsAcrossCores {
-		return opts, fmt.Errorf("static policy options %s and %s can not be used at the same time", AlignByUnCoreCacheOption, DistributeCPUsAcrossCoresOption)
+	if opts.PreferAlignByUnCoreCacheOption && opts.DistributeCPUsAcrossCores {
+		return opts, fmt.Errorf("static policy options %s and %s can not be used at the same time", PreferAlignByUnCoreCacheOption, DistributeCPUsAcrossCoresOption)
+	}
+
+	if opts.PreferAlignByUnCoreCacheOption && opts.DistributeCPUsAcrossNUMA {
+		return opts, fmt.Errorf("static policy options %s and %s can not be used at the same time", PreferAlignByUnCoreCacheOption, DistributeCPUsAcrossNUMAOption)
 	}
 
 	return opts, nil
