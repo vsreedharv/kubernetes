@@ -37,7 +37,7 @@ import (
 	. "k8s.io/kubernetes/pkg/kubelet/container"
 	ctest "k8s.io/kubernetes/pkg/kubelet/container/testing"
 	testingclock "k8s.io/utils/clock/testing"
-	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 type pullerExpects struct {
@@ -473,7 +473,7 @@ func TestMaxParallelImagePullsLimit(t *testing.T) {
 	maxParallelImagePulls := 5
 	var wg sync.WaitGroup
 
-	puller, fakeClock, fakeRuntime, container, _ := pullerTestEnv(t, *testCase, useSerializedEnv, utilpointer.Int32Ptr(int32(maxParallelImagePulls)))
+	puller, fakeClock, fakeRuntime, container, _ := pullerTestEnv(t, *testCase, useSerializedEnv, ptr.To(int32(maxParallelImagePulls)))
 	fakeRuntime.BlockImagePulls = true
 	fakeRuntime.CalledFunctions = nil
 	fakeRuntime.T = t
