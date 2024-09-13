@@ -684,6 +684,7 @@ const (
 	// owner: @atosatto @yuanchen8911
 	// kep: http://kep.k8s.io/3902
 	// beta: v1.29
+	// GA: v1.32
 	//
 	// Decouples Taint Eviction Controller, performing taint-based Pod eviction, from Node Lifecycle Controller.
 	SeparateTaintEvictionController featuregate.Feature = "SeparateTaintEvictionController"

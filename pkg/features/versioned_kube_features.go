@@ -321,6 +321,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	},
 	SeparateTaintEvictionController: {
 		{Version: version.MustParse("1.29"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("1.32"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.34
 	},
 	ServiceAccountTokenJTI: {
 		{Version: version.MustParse("1.29"), Default: false, PreRelease: featuregate.Alpha},
