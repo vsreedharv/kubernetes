@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -55,6 +56,7 @@ import (
 	serverstorage "k8s.io/apiserver/pkg/server/storage"
 	etcd3testing "k8s.io/apiserver/pkg/storage/etcd3/testing"
 	"k8s.io/apiserver/pkg/util/openapi"
+	utilversion "k8s.io/apiserver/pkg/util/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -64,7 +66,6 @@ import (
 	netutils "k8s.io/utils/net"
 
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
-	flowcontrolv1bet3 "k8s.io/kubernetes/pkg/apis/flowcontrol/v1beta3"
 	controlplaneapiserver "k8s.io/kubernetes/pkg/controlplane/apiserver"
 	"k8s.io/kubernetes/pkg/controlplane/reconcilers"
 	"k8s.io/kubernetes/pkg/controlplane/storageversionhashdata"
@@ -103,7 +104,9 @@ func setUp(t *testing.T) (*etcd3testing.EtcdTestServer, Config, *assert.Assertio
 		},
 	}
 
+	config.ControlPlane.Generic.EffectiveVersion = utilversion.DefaultKubeEffectiveVersion()
 	storageFactoryConfig := kubeapiserver.NewStorageFactoryConfig()
+	storageFactoryConfig.DefaultResourceEncoding.SetEffectiveVersion(config.ControlPlane.Generic.EffectiveVersion)
 	storageConfig.StorageObjectCountTracker = config.ControlPlane.Generic.StorageObjectCountTracker
 	resourceEncoding := resourceconfig.MergeResourceEncodingConfigs(storageFactoryConfig.DefaultResourceEncoding, storageFactoryConfig.ResourceEncodingOverrides)
 	storageFactory := serverstorage.NewDefaultStorageFactory(*storageConfig, "application/vnd.kubernetes.protobuf", storageFactoryConfig.Serializer, resourceEncoding, DefaultAPIResourceConfigSource(), nil)
@@ -115,9 +118,7 @@ func setUp(t *testing.T) (*etcd3testing.EtcdTestServer, Config, *assert.Assertio
 		t.Fatal(err)
 	}
 
-	kubeVersion := kubeversion.Get()
 	config.ControlPlane.Generic.Authorization.Authorizer = authorizerfactory.NewAlwaysAllowAuthorizer()
-	config.ControlPlane.Generic.Version = &kubeVersion
 	config.ControlPlane.StorageFactory = storageFactory
 	config.ControlPlane.Generic.LoopbackClientConfig = &restclient.Config{APIPath: "/api", ContentConfig: restclient.ContentConfig{NegotiatedSerializer: legacyscheme.Codecs}}
 	config.ControlPlane.Generic.PublicAddress = netutils.ParseIPSloppy("192.168.10.4")
@@ -240,9 +241,13 @@ func TestVersion(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+	expectedInfo := kubeversion.Get()
+	kubeVersion := utilversion.DefaultKubeEffectiveVersion().BinaryVersion()
+	expectedInfo.Major = fmt.Sprintf("%d", kubeVersion.Major())
+	expectedInfo.Minor = fmt.Sprintf("%d", kubeVersion.Minor())
 
-	if !reflect.DeepEqual(kubeversion.Get(), info) {
-		t.Errorf("Expected %#v, Got %#v", kubeversion.Get(), info)
+	if !reflect.DeepEqual(expectedInfo, info) {
+		t.Errorf("Expected %#v, Got %#v", expectedInfo, info)
 	}
 }
 
@@ -420,14 +425,6 @@ func TestDefaultVars(t *testing.T) {
 		}
 	}
 
-	// legacyBetaEnabledByDefaultResources should contain only beta version
-	for i := range legacyBetaEnabledByDefaultResources {
-		gv := legacyBetaEnabledByDefaultResources[i]
-		if !strings.Contains(gv.Version, "beta") {
-			t.Errorf("legacyBetaEnabledByDefaultResources should contain beta version, but found: %q", gv.String())
-		}
-	}
-
 	// betaAPIGroupVersionsDisabledByDefault should contain only beta version
 	for i := range betaAPIGroupVersionsDisabledByDefault {
 		gv := betaAPIGroupVersionsDisabledByDefault[i]
@@ -460,15 +457,6 @@ func TestNewBetaResourcesEnabledByDefault(t *testing.T) {
 		storageapiv1beta1.SchemeGroupVersion.WithResource("csinodes"):                     true,
 	}
 
-	// legacyBetaResourcesWithoutStableEquivalents contains those groupresources that were enabled by default as beta
-	// before we changed that policy and do not have stable versions. These resources are allowed to have additional
-	// beta versions enabled by default.  Nothing new should be added here.  There are no future exceptions because there
-	// are no more beta resources enabled by default.
-	legacyBetaResourcesWithoutStableEquivalents := map[schema.GroupResource]bool{
-		flowcontrolv1bet3.SchemeGroupVersion.WithResource("flowschemas").GroupResource():                 true,
-		flowcontrolv1bet3.SchemeGroupVersion.WithResource("prioritylevelconfigurations").GroupResource(): true,
-	}
-
 	config := DefaultAPIResourceConfigSource()
 	for gvr, enable := range config.ResourceConfigs {
 		if !strings.Contains(gvr.Version, "beta") {
@@ -479,9 +467,6 @@ func TestNewBetaResourcesEnabledByDefault(t *testing.T) {
 		}
 		if legacyEnabledBetaResources[gvr] {
 			continue // this is a legacy beta resource
-		}
-		if legacyBetaResourcesWithoutStableEquivalents[gvr.GroupResource()] {
-			continue // this is another beta of a legacy beta resource with no stable equivalent
 		}
 		t.Errorf("no new beta resources can be enabled by default, see https://github.com/kubernetes/enhancements/blob/0ad0fc8269165ca300d05ca51c7ce190a79976a5/keps/sig-architecture/3136-beta-apis-off-by-default/README.md: %v", gvr)
 	}

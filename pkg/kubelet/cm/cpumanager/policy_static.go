@@ -483,14 +483,19 @@ func (p *staticPolicy) podGuaranteedCPUs(pod *v1.Pod) int {
 }
 
 func (p *staticPolicy) takeByTopology(availableCPUs cpuset.CPUSet, numCPUs int) (cpuset.CPUSet, error) {
+	cpuSortingStrategy := CPUSortingStrategyPacked
+	if p.options.DistributeCPUsAcrossCores {
+		cpuSortingStrategy = CPUSortingStrategySpread
+	}
+
 	if p.options.DistributeCPUsAcrossNUMA {
 		cpuGroupSize := 1
 		if p.options.FullPhysicalCPUsOnly {
 			cpuGroupSize = p.topology.CPUsPerCore()
 		}
-		return takeByTopologyNUMADistributed(p.topology, availableCPUs, numCPUs, cpuGroupSize)
+		return takeByTopologyNUMADistributed(p.topology, availableCPUs, numCPUs, cpuGroupSize, cpuSortingStrategy)
 	}
-	return takeByTopologyNUMAPacked(p.topology, availableCPUs, numCPUs)
+	return takeByTopologyNUMAPacked(p.topology, availableCPUs, numCPUs, cpuSortingStrategy)
 }
 
 func (p *staticPolicy) GetTopologyHints(s state.State, pod *v1.Pod, container *v1.Container) map[string][]topologymanager.TopologyHint {
@@ -510,7 +515,7 @@ func (p *staticPolicy) GetTopologyHints(s state.State, pod *v1.Pod, container *v
 	// kubelet restart, for example.
 	if allocated, exists := s.GetCPUSet(string(pod.UID), container.Name); exists {
 		if allocated.Size() != requested {
-			klog.ErrorS(nil, "CPUs already allocated to container with different number than request", "pod", klog.KObj(pod), "containerName", container.Name, "requestedSize", requested, "allocatedSize", allocated.Size())
+			klog.InfoS("CPUs already allocated to container with different number than request", "pod", klog.KObj(pod), "containerName", container.Name, "requestedSize", requested, "allocatedSize", allocated.Size())
 			// An empty list of hints will be treated as a preference that cannot be satisfied.
 			// In definition of hints this is equal to: TopologyHint[NUMANodeAffinity: nil, Preferred: false].
 			// For all but the best-effort policy, the Topology Manager will throw a pod-admission error.
@@ -560,7 +565,7 @@ func (p *staticPolicy) GetPodTopologyHints(s state.State, pod *v1.Pod) map[strin
 		// kubelet restart, for example.
 		if allocated, exists := s.GetCPUSet(string(pod.UID), container.Name); exists {
 			if allocated.Size() != requestedByContainer {
-				klog.ErrorS(nil, "CPUs already allocated to container with different number than request", "pod", klog.KObj(pod), "containerName", container.Name, "allocatedSize", requested, "requestedByContainer", requestedByContainer, "allocatedSize", allocated.Size())
+				klog.InfoS("CPUs already allocated to container with different number than request", "pod", klog.KObj(pod), "containerName", container.Name, "allocatedSize", requested, "requestedByContainer", requestedByContainer, "allocatedSize", allocated.Size())
 				// An empty list of hints will be treated as a preference that cannot be satisfied.
 				// In definition of hints this is equal to: TopologyHint[NUMANodeAffinity: nil, Preferred: false].
 				// For all but the best-effort policy, the Topology Manager will throw a pod-admission error.

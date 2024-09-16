@@ -36,7 +36,7 @@ import (
 
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmscheme "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/scheme"
-	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta4"
 	outputapischeme "k8s.io/kubernetes/cmd/kubeadm/app/apis/output/scheme"
 	outputapiv1alpha3 "k8s.io/kubernetes/cmd/kubeadm/app/apis/output/v1alpha3"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
@@ -104,9 +104,9 @@ func newCmdCertsUtility(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "certs",
 		Aliases: []string{"certificates"},
-		Short:   "Commands related to handling kubernetes certificates",
-		Run:     cmdutil.SubCmdRun(),
+		Short:   "Commands related to handling Kubernetes certificates",
 	}
+	cmdutil.RequireSubcommand(cmd)
 
 	cmd.AddCommand(newCmdCertsRenewal(out))
 	cmd.AddCommand(newCmdCertsExpiration(out, kubeadmconstants.KubernetesDir))
@@ -215,9 +215,8 @@ func newCmdCertsRenewal(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "renew",
 		Short: "Renew certificates for a Kubernetes cluster",
-		Long:  cmdutil.MacroCommandLongDescription,
-		Run:   cmdutil.SubCmdRun(),
 	}
+	cmdutil.RequireSubcommand(cmd)
 
 	cmd.AddCommand(getRenewSubCommands(out, kubeadmconstants.KubernetesDir)...)
 

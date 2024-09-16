@@ -54,7 +54,7 @@
   - "./staging/src/k8s.io/code-generator/examples"
   - "./staging/src/k8s.io/code-generator/cmd/defaulter-gen/output_tests"
   allowedImports:
-  - k8s.io/gengo
+  - k8s.io/gengo/v2
   - k8s.io/code-generator
   - k8s.io/kube-openapi
   - k8s.io/klog
@@ -91,6 +91,7 @@
   ignoredSubTrees:
   - "./staging/src/k8s.io/client-go/tools/cache/testing"
   - "./staging/src/k8s.io/client-go/tools/leaderelection/resourcelock"
+  - "./staging/src/k8s.io/client-go/tools/leaderelection"
   - "./staging/src/k8s.io/client-go/tools/portforward"
   - "./staging/src/k8s.io/client-go/tools/record"
   - "./staging/src/k8s.io/client-go/tools/events"
@@ -179,7 +180,7 @@
 - baseImportPath: "./vendor/k8s.io/kube-openapi"
   allowedImports:
   - k8s.io/kube-openapi
-  - k8s.io/gengo
+  - k8s.io/gengo/v2
   - k8s.io/klog
   - k8s.io/utils
 
@@ -256,6 +257,7 @@
   - k8s.io/apiserver/pkg/cel
   - k8s.io/apiserver/pkg/cel/environment
   - k8s.io/client-go
+  - k8s.io/component-helpers/scheduling/corev1/nodeaffinity
   - k8s.io/dynamic-resource-allocation
   - k8s.io/klog
   - k8s.io/kubelet

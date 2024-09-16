@@ -1806,6 +1806,15 @@ function prepare-kube-proxy-manifest-variables {
     kube_watchlist_inconsistency_detector_env_name="- name: KUBE_WATCHLIST_INCONSISTENCY_DETECTOR"
     kube_watchlist_inconsistency_detector_env_value="value: \"${ENABLE_KUBE_WATCHLIST_INCONSISTENCY_DETECTOR}\""
   fi
+  local kube_list_from_cache_inconsistency_detector_env_name=""
+  local kube_list_from_cache_inconsistency_detector_env_value=""
+  if [[ -n "${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR:-}" ]]; then
+    if [[ -z "${container_env}" ]]; then
+      container_env="env:"
+    fi
+    kube_list_from_cache_inconsistency_detector_env_name="- name: KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR"
+    kube_list_from_cache_inconsistency_detector_env_value="value: \"${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR}\""
+  fi
   sed -i -e "s@{{kubeconfig}}@${kubeconfig}@g" "${src_file}"
   sed -i -e "s@{{pillar\['kube_docker_registry'\]}}@${kube_docker_registry}@g" "${src_file}"
   sed -i -e "s@{{pillar\['kube-proxy_docker_tag'\]}}@${kube_proxy_docker_tag}@g" "${src_file}"
@@ -1817,6 +1826,8 @@ function prepare-kube-proxy-manifest-variables {
   sed -i -e "s@{{kube_cache_mutation_detector_env_value}}@${kube_cache_mutation_detector_env_value}@g" "${src_file}"
   sed -i -e "s@{{kube_watchlist_inconsistency_detector_env_name}}@${kube_watchlist_inconsistency_detector_env_name}@g" "${src_file}"
   sed -i -e "s@{{kube_watchlist_inconsistency_detector_env_value}}@${kube_watchlist_inconsistency_detector_env_value}@g" "${src_file}"
+  sed -i -e "s@{{kube_list_from_cache_inconsistency_detector_env_name}}@${kube_list_from_cache_inconsistency_detector_env_name}@g" "${src_file}"
+  sed -i -e "s@{{kube_list_from_cache_inconsistency_detector_env_value}}@${kube_list_from_cache_inconsistency_detector_env_value}@g" "${src_file}"
   sed -i -e "s@{{ cpurequest }}@${KUBE_PROXY_CPU_REQUEST:-100m}@g" "${src_file}"
   sed -i -e "s@{{ memoryrequest }}@${KUBE_PROXY_MEMORY_REQUEST:-50Mi}@g" "${src_file}"
   sed -i -e "s@{{api_servers_with_port}}@${api_servers}@g" "${src_file}"
@@ -2230,6 +2241,9 @@ function start-kube-controller-manager {
   if [[ -n "${FEATURE_GATES:-}" ]]; then
     params+=("--feature-gates=${FEATURE_GATES}")
   fi
+  if [[ -n "${KUBE_EMULATED_VERSION:-}" ]]; then
+    params+=("--emulated-version=kube=${KUBE_EMULATED_VERSION}")
+  fi
   if [[ -n "${VOLUME_PLUGIN_DIR:-}" ]]; then
     params+=("--flex-volume-plugin-dir=${VOLUME_PLUGIN_DIR}")
   fi
@@ -2255,10 +2269,15 @@ function start-kube-controller-manager {
     fi
     container_env+="{\"name\": \"KUBE_WATCHLIST_INCONSISTENCY_DETECTOR\", \"value\": \"${ENABLE_KUBE_WATCHLIST_INCONSISTENCY_DETECTOR}\"}"
   fi
+  if [[ -n "${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR:-}" ]]; then
+    if [[ -n "${container_env}" ]]; then
+      container_env="${container_env}, "
+    fi
+    container_env+="{\"name\": \"KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR\", \"value\": \"${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR}\"}"
+  fi
   if [[ -n "${container_env}" ]]; then
     container_env="\"env\":[${container_env}],"
   fi
-
   local paramstring
   paramstring="$(convert-manifest-params "${params[*]}")"
   local -r src_file="${KUBE_HOME}/kube-manifests/kubernetes/gci-trusty/kube-controller-manager.manifest"
@@ -2370,6 +2389,12 @@ function start-cloud-controller-manager {
     fi
     container_env+="{\"name\": \"KUBE_WATCHLIST_INCONSISTENCY_DETECTOR\", \"value\": \"${ENABLE_KUBE_WATCHLIST_INCONSISTENCY_DETECTOR}\"}"
   fi
+  if [[ -n "${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR:-}" ]]; then
+    if [[ -n "${container_env}" ]]; then
+      container_env="${container_env}, "
+    fi
+    container_env+="{\"name\": \"KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR\", \"value\": \"${ENABLE_KUBE_LIST_FROM_CACHE_INCONSISTENCY_DETECTOR}\"}"
+  fi
   if [[ -n "${container_env}" ]]; then
     container_env="\"env\":[${container_env}],"
   fi
@@ -2431,6 +2456,9 @@ function start-kube-scheduler {
   params=("${SCHEDULER_TEST_LOG_LEVEL:-"--v=2"}" "${SCHEDULER_TEST_ARGS:-}")
   if [[ -n "${FEATURE_GATES:-}" ]]; then
     params+=("--feature-gates=${FEATURE_GATES}")
+  fi
+  if [[ -n "${KUBE_EMULATED_VERSION:-}" ]]; then
+    params+=("--emulated-version=kube=${KUBE_EMULATED_VERSION}")
   fi
 
   # Scheduler Component Config takes precedence over some flags.
@@ -3130,7 +3158,7 @@ Or you can download it at:
   https://storage.googleapis.com/gke-release/kubernetes/release/${version}/kubernetes-src.tar.gz
 
 It is based on the Kubernetes source at:
-  https://github.com/kubernetes/kubernetes/tree/${gitref}
+  https://github.com/kubernetes/kubernetes/tree/${gitref/-gke.*/}
 ${devel}
 For Kubernetes copyright and licensing information, see:
   /home/kubernetes/LICENSES
@@ -3186,7 +3214,7 @@ spec:
   - name: vol
   containers:
   - name: pv-recycler
-    image: registry.k8s.io/build-image/debian-base:bookworm-v1.0.2
+    image: registry.k8s.io/build-image/debian-base:bookworm-v1.0.4
     command:
     - /bin/sh
     args:
@@ -3287,15 +3315,31 @@ oom_score = -999
   default_runtime_name = "runc"
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
   runtime_type = "io.containerd.runc.v2"
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-  endpoint = ["https://mirror.gcr.io","https://registry-1.docker.io"]
-# Enable registry.k8s.io as the primary mirror for k8s.gcr.io
-# See: https://github.com/kubernetes/k8s.io/issues/3411
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."k8s.gcr.io"]
-  endpoint = ["https://registry.k8s.io", "https://k8s.gcr.io",]
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
   SystemdCgroup = ${systemdCgroup}
+# enable hosts config
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
 EOF
+
+  # used for 5k node scale tests with private pull-through cache
+  if [[ -n "${KUBERNETES_REGISTRY_PULL_THROUGH_HOST:-}" ]]; then
+    registry_config_dir="/etc/containerd/certs.d/registry.k8s.io"
+    mkdir -p "${registry_config_dir}"
+    {
+      # NOTE: we need literal double quotes around some of these values
+      echo 'server="'"${KUBERNETES_REGISTRY_PULL_THROUGH_HOST}"'"'
+      echo ''
+      echo '[host."'"${KUBERNETES_REGISTRY_PULL_THROUGH_HOST}"'"]'
+      echo '  override_path = true'
+      echo '  capabilities = ["pull", "resolve"]'
+      # TODO: this is a hack. https://github.com/containerd/containerd/issues/7385
+      echo '[host."'"${KUBERNETES_REGISTRY_PULL_THROUGH_HOST}"'".header]'
+      if [[ -n "${KUBERNETES_REGISTRY_PULL_THROUGH_BASIC_AUTH_TOKEN:-}" ]]; then
+        echo "  authorization = '""${KUBERNETES_REGISTRY_PULL_THROUGH_BASIC_AUTH_TOKEN}""'"
+      fi
+    } > "${registry_config_dir}/hosts.toml"
+  fi
 
   if [[ "${CONTAINER_RUNTIME_TEST_HANDLER:-}" == "true" ]]; then
   cat >> "${config_path}" <<EOF

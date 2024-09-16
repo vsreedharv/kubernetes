@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	goruntime "runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,13 +38,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	watcherapi "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/checkpointmanager"
 	"k8s.io/kubernetes/pkg/kubelet/cm/containermap"
 	"k8s.io/kubernetes/pkg/kubelet/cm/devicemanager/checkpoint"
 	plugin "k8s.io/kubernetes/pkg/kubelet/cm/devicemanager/plugin/v1beta1"
+	"k8s.io/kubernetes/pkg/kubelet/cm/resourceupdates"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
 	"k8s.io/kubernetes/pkg/kubelet/config"
@@ -312,8 +317,8 @@ func setupPluginManager(t *testing.T, pluginSocketName string, m Manager) plugin
 }
 
 func runPluginManager(pluginManager pluginmanager.PluginManager) {
-	// FIXME: Replace sets.String with sets.Set[string]
-	sourcesReady := config.NewSourcesReady(func(_ sets.String) bool { return true })
+	// FIXME: Replace sets.Set[string] with sets.Set[string]
+	sourcesReady := config.NewSourcesReady(func(_ sets.Set[string]) bool { return true })
 	go pluginManager.Run(sourcesReady, wait.NeverStop)
 }
 
@@ -365,7 +370,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	as.True(ok)
 	as.Equal(int64(3), resource1Capacity.Value())
 	as.Equal(int64(2), resource1Allocatable.Value())
-	as.Equal(0, len(removedResources))
+	as.Empty(removedResources)
 
 	// Deletes an unhealthy device should NOT change allocatable but change capacity.
 	devs1 := devs[:len(devs)-1]
@@ -377,7 +382,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	as.True(ok)
 	as.Equal(int64(2), resource1Capacity.Value())
 	as.Equal(int64(2), resource1Allocatable.Value())
-	as.Equal(0, len(removedResources))
+	as.Empty(removedResources)
 
 	// Updates a healthy device to unhealthy should reduce allocatable by 1.
 	devs[1].Health = pluginapi.Unhealthy
@@ -389,7 +394,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	as.True(ok)
 	as.Equal(int64(3), resource1Capacity.Value())
 	as.Equal(int64(1), resource1Allocatable.Value())
-	as.Equal(0, len(removedResources))
+	as.Empty(removedResources)
 
 	// Deletes a healthy device should reduce capacity and allocatable by 1.
 	devs2 := devs[1:]
@@ -401,7 +406,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	as.True(ok)
 	as.Equal(int64(0), resource1Allocatable.Value())
 	as.Equal(int64(2), resource1Capacity.Value())
-	as.Equal(0, len(removedResources))
+	as.Empty(removedResources)
 
 	// Tests adding another resource.
 	resourceName2 := "resource2"
@@ -410,14 +415,14 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	testManager.endpoints[resourceName2] = endpointInfo{e: e2, opts: nil}
 	callback(resourceName2, devs)
 	capacity, allocatable, removedResources = testManager.GetCapacity()
-	as.Equal(2, len(capacity))
+	as.Len(capacity, 2)
 	resource2Capacity, ok := capacity[v1.ResourceName(resourceName2)]
 	as.True(ok)
 	resource2Allocatable, ok := allocatable[v1.ResourceName(resourceName2)]
 	as.True(ok)
 	as.Equal(int64(3), resource2Capacity.Value())
 	as.Equal(int64(1), resource2Allocatable.Value())
-	as.Equal(0, len(removedResources))
+	as.Empty(removedResources)
 
 	// Expires resourceName1 endpoint. Verifies testManager.GetCapacity() reports that resourceName1
 	// is removed from capacity and it no longer exists in healthyDevices after the call.
@@ -432,7 +437,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	as.NotContains(testManager.healthyDevices, resourceName1)
 	as.NotContains(testManager.unhealthyDevices, resourceName1)
 	as.NotContains(testManager.endpoints, resourceName1)
-	as.Equal(1, len(testManager.endpoints))
+	as.Len(testManager.endpoints, 1)
 
 	// Stops resourceName2 endpoint. Verifies its stopTime is set, allocate and
 	// preStartContainer calls return errors.
@@ -464,7 +469,7 @@ func TestUpdateCapacityAllocatable(t *testing.T) {
 	testManager.unhealthyDevices = make(map[string]sets.Set[string])
 	err = testManager.readCheckpoint()
 	as.Nil(err)
-	as.Equal(1, len(testManager.endpoints))
+	as.Len(testManager.endpoints, 1)
 	as.Contains(testManager.endpoints, resourceName2)
 	capacity, allocatable, removed = testManager.GetCapacity()
 	val, ok = capacity[v1.ResourceName(resourceName2)]
@@ -506,7 +511,7 @@ func TestGetAllocatableDevicesMultipleResources(t *testing.T) {
 	testManager.genericDeviceUpdateCallback(resourceName2, resource2Devs)
 
 	allocatableDevs := testManager.GetAllocatableDevices()
-	as.Equal(2, len(allocatableDevs))
+	as.Len(allocatableDevs, 2)
 
 	devInstances1, ok := allocatableDevs[resourceName1]
 	as.True(ok)
@@ -543,7 +548,7 @@ func TestGetAllocatableDevicesHealthTransition(t *testing.T) {
 	testManager.genericDeviceUpdateCallback(resourceName1, resource1Devs)
 
 	allocatableDevs := testManager.GetAllocatableDevices()
-	as.Equal(1, len(allocatableDevs))
+	as.Len(allocatableDevs, 1)
 	devInstances, ok := allocatableDevs[resourceName1]
 	as.True(ok)
 	checkAllocatableDevicesConsistsOf(as, devInstances, []string{"R1Device1", "R1Device2"})
@@ -557,7 +562,7 @@ func TestGetAllocatableDevicesHealthTransition(t *testing.T) {
 	testManager.genericDeviceUpdateCallback(resourceName1, resource1Devs)
 
 	allocatableDevs = testManager.GetAllocatableDevices()
-	as.Equal(1, len(allocatableDevs))
+	as.Len(allocatableDevs, 1)
 	devInstances, ok = allocatableDevs[resourceName1]
 	as.True(ok)
 	checkAllocatableDevicesConsistsOf(as, devInstances, []string{"R1Device1", "R1Device2", "R1Device3"})
@@ -1293,9 +1298,9 @@ func TestGetDeviceRunContainerOptions(t *testing.T) {
 	// when pod is in activePods, GetDeviceRunContainerOptions should return
 	runContainerOpts, err := testManager.GetDeviceRunContainerOptions(pod1, &pod1.Spec.Containers[0])
 	as.Nil(err)
-	as.Equal(len(runContainerOpts.Devices), 3)
-	as.Equal(len(runContainerOpts.Mounts), 2)
-	as.Equal(len(runContainerOpts.Envs), 2)
+	as.Len(runContainerOpts.Devices, 3)
+	as.Len(runContainerOpts.Mounts, 2)
+	as.Len(runContainerOpts.Envs, 2)
 
 	activePods = []*v1.Pod{pod2}
 	podsStub.updateActivePods(activePods)
@@ -1643,7 +1648,7 @@ func TestDevicePreStartContainer(t *testing.T) {
 
 	expectedResps, err := allocateStubFunc()([]string{"dev1", "dev2"})
 	as.Nil(err)
-	as.Equal(1, len(expectedResps.ContainerResponses))
+	as.Len(expectedResps.ContainerResponses, 1)
 	expectedResp := expectedResps.ContainerResponses[0]
 	as.Equal(len(runContainerOpts.Devices), len(expectedResp.Devices))
 	as.Equal(len(runContainerOpts.Mounts), len(expectedResp.Mounts))
@@ -1849,4 +1854,179 @@ func TestGetTopologyHintsWithUpdates(t *testing.T) {
 			wg.Wait()
 		})
 	}
+}
+func TestUpdateAllocatedResourcesStatus(t *testing.T) {
+	podUID := "test-pod-uid"
+	containerName := "test-container"
+	resourceName := "test-resource"
+
+	tmpDir, err := os.MkdirTemp("", "checkpoint")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	defer func() {
+		err = os.RemoveAll(tmpDir)
+		if err != nil {
+			t.Fatalf("Fail to remove tmpdir: %v", err)
+		}
+	}()
+	ckm, err := checkpointmanager.NewCheckpointManager(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create checkpoint manager: %v", err)
+	}
+
+	testManager := &ManagerImpl{
+		endpoints:         make(map[string]endpointInfo),
+		healthyDevices:    make(map[string]sets.Set[string]),
+		unhealthyDevices:  make(map[string]sets.Set[string]),
+		allocatedDevices:  make(map[string]sets.Set[string]),
+		allDevices:        make(map[string]DeviceInstances),
+		podDevices:        newPodDevices(),
+		checkpointManager: ckm,
+	}
+
+	testManager.podDevices.insert(podUID, containerName, resourceName,
+		constructDevices([]string{"dev1", "dev2"}),
+		newContainerAllocateResponse(
+			withDevices(map[string]string{"/dev/r1dev1": "/dev/r1dev1", "/dev/r1dev2": "/dev/r1dev2"}),
+			withMounts(map[string]string{"/home/r1lib1": "/usr/r1lib1"}),
+		),
+	)
+
+	testManager.genericDeviceUpdateCallback(resourceName, []pluginapi.Device{
+		{ID: "dev1", Health: pluginapi.Healthy},
+		{ID: "dev2", Health: pluginapi.Unhealthy},
+	})
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: types.UID(podUID),
+		},
+	}
+	status := &v1.PodStatus{
+		ContainerStatuses: []v1.ContainerStatus{
+			{
+				Name: containerName,
+			},
+		},
+	}
+	testManager.UpdateAllocatedResourcesStatus(pod, status)
+
+	expectedStatus := v1.ResourceStatus{
+		Name: v1.ResourceName(resourceName),
+		Resources: []v1.ResourceHealth{
+			{
+				ResourceID: "dev1",
+				Health:     pluginapi.Healthy,
+			},
+			{
+				ResourceID: "dev2",
+				Health:     pluginapi.Unhealthy,
+			},
+		},
+	}
+	expectedContainerStatuses := []v1.ContainerStatus{
+		{
+			Name:                     containerName,
+			AllocatedResourcesStatus: []v1.ResourceStatus{expectedStatus},
+		},
+	}
+
+	// Sort the resources for the expected status and actual status
+	sortContainerStatuses(status.ContainerStatuses)
+	sortContainerStatuses(expectedContainerStatuses)
+
+	if !reflect.DeepEqual(status.ContainerStatuses, expectedContainerStatuses) {
+		t.Errorf("UpdateAllocatedResourcesStatus failed, expected: %v, got: %v", expectedContainerStatuses, status.ContainerStatuses)
+	}
+}
+
+// Helper function to sort ResourceHealth slices
+func sortResourceHealth(resources []v1.ResourceHealth) {
+	sort.SliceStable(resources, func(i, j int) bool {
+		return resources[i].ResourceID < resources[j].ResourceID
+	})
+}
+
+// Helper function to sort ContainerStatus slices
+func sortContainerStatuses(statuses []v1.ContainerStatus) {
+	for i := range statuses {
+		for j := range statuses[i].AllocatedResourcesStatus {
+			sortResourceHealth(statuses[i].AllocatedResourcesStatus[j].Resources)
+		}
+	}
+}
+
+func TestFeatureGateResourceHealthStatus(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "checkpoint")
+	require.NoError(t, err, "err should be nil")
+	defer func() {
+		err = os.RemoveAll(tmpDir)
+		if err != nil {
+			t.Fatalf("Fail to remove tmpdir: %v", err)
+		}
+	}()
+	ckm, err := checkpointmanager.NewCheckpointManager(tmpDir)
+	require.NoError(t, err, "err should be nil")
+	resourceName := "domain1.com/resource1"
+	existDevices := map[string]DeviceInstances{
+		resourceName: map[string]pluginapi.Device{
+			"dev1": {
+				ID:     "dev1",
+				Health: pluginapi.Healthy,
+			},
+			"dev2": {
+				ID:     "dev2",
+				Health: pluginapi.Unhealthy,
+			},
+		},
+	}
+	testManager := &ManagerImpl{
+		allDevices:        ResourceDeviceInstances(existDevices),
+		endpoints:         make(map[string]endpointInfo),
+		healthyDevices:    make(map[string]sets.Set[string]),
+		unhealthyDevices:  make(map[string]sets.Set[string]),
+		allocatedDevices:  make(map[string]sets.Set[string]),
+		podDevices:        newPodDevices(),
+		checkpointManager: ckm,
+		update:            make(chan resourceupdates.Update),
+	}
+
+	podID := "pod1"
+	contID := "con1"
+	devices := checkpoint.DevicesPerNUMA{0: []string{"dev1"}, 1: []string{"dev1"}}
+
+	testManager.podDevices.insert(podID, contID, resourceName,
+		devices,
+		newContainerAllocateResponse(
+			withDevices(map[string]string{"/dev/r1dev1": "/dev/r1dev1", "/dev/r1dev2": "/dev/r1dev2"}),
+			withMounts(map[string]string{"/home/r1lib1": "/usr/r1lib1"}),
+		),
+	)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ResourceHealthStatus, true)
+
+	testManager.genericDeviceUpdateCallback(resourceName, []pluginapi.Device{
+		{ID: "dev1", Health: pluginapi.Healthy},
+		{ID: "dev2", Health: pluginapi.Unhealthy},
+	})
+	// update chan no data
+	assert.Empty(t, len(testManager.update), 0)
+
+	// update chan receive pod1
+	var wg sync.WaitGroup
+	go func() {
+		defer wg.Done()
+		u := <-testManager.update
+		assert.Equal(t, resourceupdates.Update{
+			PodUIDs: []string{"pod1"},
+		}, u)
+	}()
+	wg.Add(1)
+	testManager.genericDeviceUpdateCallback(resourceName, []pluginapi.Device{
+		{ID: "dev1", Health: pluginapi.Unhealthy},
+		{ID: "dev2", Health: pluginapi.Healthy},
+	})
+	wg.Wait()
+
 }

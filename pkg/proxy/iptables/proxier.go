@@ -280,7 +280,7 @@ func NewProxier(ctx context.Context,
 	serviceHealthServer := healthcheck.NewServiceHealthServer(hostname, recorder, nodePortAddresses, healthzServer)
 	nfacctRunner, err := nfacct.New()
 	if err != nil {
-		logger.Error(err, "Failed to create nfacct runner")
+		logger.Error(err, "Failed to create nfacct runner, nfacct based metrics won't be available")
 	}
 
 	proxier := &Proxier{
@@ -294,7 +294,7 @@ func NewProxier(ctx context.Context,
 		iptables:                 ipt,
 		masqueradeAll:            masqueradeAll,
 		masqueradeMark:           masqueradeMark,
-		conntrack:                conntrack.NewExec(exec),
+		conntrack:                conntrack.New(),
 		nfacct:                   nfacctRunner,
 		localDetector:            localDetector,
 		hostname:                 hostname,
@@ -314,7 +314,10 @@ func NewProxier(ctx context.Context,
 		networkInterfacer:        proxyutil.RealNetwork{},
 		conntrackTCPLiberal:      conntrackTCPLiberal,
 		logger:                   logger,
-		nfAcctCounters:           map[string]bool{metrics.IPTablesCTStateInvalidDroppedNFAcctCounter: false},
+		nfAcctCounters: map[string]bool{
+			metrics.IPTablesCTStateInvalidDroppedNFAcctCounter: false,
+			metrics.LocalhostNodePortAcceptedNFAcctCounter:     false,
+		},
 	}
 
 	burstSyncs := 2
@@ -1183,6 +1186,16 @@ func (proxier *Proxier) syncProxyRules() {
 				// Jump to the external destination chain.  For better or for
 				// worse, nodeports are not subect to loadBalancerSourceRanges,
 				// and we can't change that.
+				if proxier.localhostNodePorts && proxier.ipFamily == v1.IPv4Protocol && proxier.nfAcctCounters[metrics.LocalhostNodePortAcceptedNFAcctCounter] {
+					natRules.Write(
+						"-A", string(kubeNodePortsChain),
+						"-m", "comment", "--comment", svcPortNameString,
+						"-m", protocol, "-p", protocol,
+						"-d", "127.0.0.0/8",
+						"--dport", strconv.Itoa(svcInfo.NodePort()),
+						"-m", "nfacct", "--nfacct-name", metrics.LocalhostNodePortAcceptedNFAcctCounter,
+						"-j", string(externalTrafficChain))
+				}
 				natRules.Write(
 					"-A", string(kubeNodePortsChain),
 					"-m", "comment", "--comment", svcPortNameString,
@@ -1582,7 +1595,7 @@ func (proxier *Proxier) syncProxyRules() {
 	}
 
 	// Finish housekeeping, clear stale conntrack entries for UDP Services
-	conntrack.CleanStaleEntries(proxier.conntrack, proxier.svcPortMap, serviceUpdateResult, endpointUpdateResult)
+	conntrack.CleanStaleEntries(proxier.conntrack, proxier.ipFamily, proxier.svcPortMap, serviceUpdateResult, endpointUpdateResult)
 }
 
 func (proxier *Proxier) writeServiceToEndpointRules(natRules proxyutil.LineBuffer, svcPortNameString string, svcInfo proxy.ServicePort, svcChain utiliptables.Chain, endpoints []proxy.Endpoint, args []string) {

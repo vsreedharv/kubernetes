@@ -56,7 +56,7 @@ LIMITED_SWAP=${LIMITED_SWAP:-""}
 
 # required for cni installation
 CNI_CONFIG_DIR=${CNI_CONFIG_DIR:-/etc/cni/net.d}
-CNI_PLUGINS_VERSION=${CNI_PLUGINS_VERSION:-"v1.5.0"}
+CNI_PLUGINS_VERSION=${CNI_PLUGINS_VERSION:-"v1.5.1"}
 # The arch of the CNI binary, if not set, will be fetched based on the value of `uname -m`
 CNI_TARGETARCH=${CNI_TARGETARCH:-""}
 CNI_PLUGINS_URL="https://github.com/containernetworking/plugins/releases/download"
@@ -94,6 +94,7 @@ CLOUD_PROVIDER=${CLOUD_PROVIDER:-""}
 CLOUD_CONFIG=${CLOUD_CONFIG:-""}
 KUBELET_PROVIDER_ID=${KUBELET_PROVIDER_ID:-"$(hostname)"}
 FEATURE_GATES=${FEATURE_GATES:-"AllAlpha=false"}
+EMULATED_VERSION=${EMULATED_VERSION:+kube=$EMULATED_VERSION}
 CPUMANAGER_POLICY=${CPUMANAGER_POLICY:-""}
 CPUMANAGER_RECONCILE_PERIOD=${CPUMANAGER_RECONCILE_PERIOD:-""}
 CPUMANAGER_POLICY_OPTIONS=${CPUMANAGER_POLICY_OPTIONS:-""}
@@ -242,7 +243,7 @@ EXTERNAL_HOSTNAME=${EXTERNAL_HOSTNAME:-localhost}
 KUBELET_HOST=${KUBELET_HOST:-"127.0.0.1"}
 KUBELET_RESOLV_CONF=${KUBELET_RESOLV_CONF:-"/etc/resolv.conf"}
 # By default only allow CORS for requests on localhost
-API_CORS_ALLOWED_ORIGINS=${API_CORS_ALLOWED_ORIGINS:-/127.0.0.1(:[0-9]+)?$,/localhost(:[0-9]+)?$}
+API_CORS_ALLOWED_ORIGINS=${API_CORS_ALLOWED_ORIGINS:-//127.0.0.1(:[0-9]+)?$,//localhost(:[0-9]+)?$}
 KUBELET_PORT=${KUBELET_PORT:-10250}
 # By default we use 0(close it) for it's insecure
 KUBELET_READ_ONLY_PORT=${KUBELET_READ_ONLY_PORT:-0}
@@ -632,6 +633,7 @@ EOF
       --etcd-servers="http://${ETCD_HOST}:${ETCD_PORT}" \
       --service-cluster-ip-range="${SERVICE_CLUSTER_IP_RANGE}" \
       --feature-gates="${FEATURE_GATES}" \
+      --emulated-version="${EMULATED_VERSION}" \
       --external-hostname="${EXTERNAL_HOSTNAME}" \
       --requestheader-username-headers=X-Remote-User \
       --requestheader-group-headers=X-Remote-Group \
@@ -692,6 +694,7 @@ function start_controller_manager {
       --enable-hostpath-provisioner="${ENABLE_HOSTPATH_PROVISIONER}" \
       --pvclaimbinder-sync-period="${CLAIM_BINDER_SYNC_PERIOD}" \
       --feature-gates="${FEATURE_GATES}" \
+      --emulated-version="${EMULATED_VERSION}" \
       "${cloud_config_arg[@]}" \
       --authentication-kubeconfig "${CERT_DIR}"/controller.kubeconfig \
       --authorization-kubeconfig "${CERT_DIR}"/controller.kubeconfig \
@@ -1025,6 +1028,7 @@ EOF
       --v="${LOG_LEVEL}" \
       --config="${TMP_DIR}"/kube-scheduler.yaml \
       --feature-gates="${FEATURE_GATES}" \
+      --emulated-version="${EMULATED_VERSION}" \
       --authentication-kubeconfig "${CERT_DIR}"/scheduler.kubeconfig \
       --authorization-kubeconfig "${CERT_DIR}"/scheduler.kubeconfig \
       --master="https://${API_HOST}:${API_SECURE_PORT}" >"${SCHEDULER_LOG}" 2>&1 &
@@ -1039,7 +1043,7 @@ function start_dns_addon {
         ${SED} -i -e "s/dns_memory_limit/${DNS_MEMORY_LIMIT}/g" dns.yaml
         # TODO update to dns role once we have one.
         # use kubectl to create dns addon
-        if ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" --namespace=kube-system create -f dns.yaml ; then
+        if ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" --namespace=kube-system apply -f dns.yaml ; then
             echo "${DNS_ADDON} addon successfully deployed."
         else
 		echo "Something is wrong with your DNS input"
@@ -1058,7 +1062,7 @@ function start_nodelocaldns {
   ${SED} -i -e "s/__PILLAR__LOCAL__DNS__/${LOCAL_DNS_IP}/g" nodelocaldns.yaml
 
   # use kubectl to create nodelocaldns addon
-  ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" --namespace=kube-system create -f nodelocaldns.yaml
+  ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" --namespace=kube-system apply -f nodelocaldns.yaml
   echo "NodeLocalDNS addon successfully deployed."
   rm nodelocaldns.yaml
 }
@@ -1085,7 +1089,7 @@ function create_storage_class {
 
     if [ -e "${CLASS_FILE}" ]; then
         echo "Create default storage class for ${CLOUD_PROVIDER}"
-        ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" create -f "${CLASS_FILE}"
+        ${KUBECTL} --kubeconfig="${CERT_DIR}/admin.kubeconfig" apply -f "${CLASS_FILE}"
     else
         echo "No storage class available for ${CLOUD_PROVIDER}."
     fi

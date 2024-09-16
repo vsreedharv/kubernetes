@@ -40,7 +40,7 @@ import (
 
 	bootstraptokenv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/bootstraptoken/v1"
 	kubeadmscheme "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/scheme"
-	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta4"
 	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/validation"
 	outputapischeme "k8s.io/kubernetes/cmd/kubeadm/app/apis/output/scheme"
 	outputapiv1alpha3 "k8s.io/kubernetes/cmd/kubeadm/app/apis/output/v1alpha3"
@@ -77,14 +77,8 @@ func newCmdToken(out io.Writer, errW io.Writer) *cobra.Command {
 			You can read more about bootstrap tokens here:
 			  https://kubernetes.io/docs/admin/bootstrap-tokens/
 		`),
-
-		// Without this callback, if a user runs just the "token"
-		// command without a subcommand, or with an invalid subcommand,
-		// cobra will print usage information, but still exit cleanly.
-		// We want to return an error code in these cases so that the
-		// user knows that their command was invalid.
-		Run: cmdutil.SubCmdRun(),
 	}
+	cmdutil.RequireSubcommand(tokenCmd)
 
 	options.AddKubeConfigFlag(tokenCmd.PersistentFlags(), &kubeConfigFile)
 	tokenCmd.PersistentFlags().BoolVar(&dryRun,

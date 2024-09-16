@@ -29,6 +29,7 @@ import (
 	"encoding/base32"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -40,9 +41,9 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/events"
-	utilsysctl "k8s.io/component-helpers/node/util/sysctl"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/proxy"
 	"k8s.io/kubernetes/pkg/proxy/conntrack"
@@ -51,7 +52,7 @@ import (
 	"k8s.io/kubernetes/pkg/proxy/metrics"
 	proxyutil "k8s.io/kubernetes/pkg/proxy/util"
 	"k8s.io/kubernetes/pkg/util/async"
-	utilexec "k8s.io/utils/exec"
+	utilkernel "k8s.io/kubernetes/pkg/util/kernel"
 	netutils "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
@@ -105,7 +106,6 @@ const (
 // NewDualStackProxier creates a MetaProxier instance, with IPv4 and IPv6 proxies.
 func NewDualStackProxier(
 	ctx context.Context,
-	sysctl utilsysctl.Interface,
 	syncPeriod time.Duration,
 	minSyncPeriod time.Duration,
 	masqueradeAll bool,
@@ -119,7 +119,7 @@ func NewDualStackProxier(
 	initOnly bool,
 ) (proxy.Provider, error) {
 	// Create an ipv4 instance of the single-stack proxier
-	ipv4Proxier, err := NewProxier(ctx, v1.IPv4Protocol, sysctl,
+	ipv4Proxier, err := NewProxier(ctx, v1.IPv4Protocol,
 		syncPeriod, minSyncPeriod, masqueradeAll, masqueradeBit,
 		localDetectors[v1.IPv4Protocol], hostname, nodeIPs[v1.IPv4Protocol],
 		recorder, healthzServer, nodePortAddresses, initOnly)
@@ -127,7 +127,7 @@ func NewDualStackProxier(
 		return nil, fmt.Errorf("unable to create ipv4 proxier: %v", err)
 	}
 
-	ipv6Proxier, err := NewProxier(ctx, v1.IPv6Protocol, sysctl,
+	ipv6Proxier, err := NewProxier(ctx, v1.IPv6Protocol,
 		syncPeriod, minSyncPeriod, masqueradeAll, masqueradeBit,
 		localDetectors[v1.IPv6Protocol], hostname, nodeIPs[v1.IPv6Protocol],
 		recorder, healthzServer, nodePortAddresses, initOnly)
@@ -161,6 +161,7 @@ type Proxier struct {
 	// updating nftables with some partial data after kube-proxy restart.
 	endpointSlicesSynced bool
 	servicesSynced       bool
+	needFullSync         bool
 	initialized          int32
 	syncRunner           *async.BoundedFrequencyRunner // governs calls to syncProxyRules
 	syncPeriod           time.Duration
@@ -193,6 +194,13 @@ type Proxier struct {
 	serviceCIDRs string
 
 	logger klog.Logger
+
+	clusterIPs          *nftElementStorage
+	serviceIPs          *nftElementStorage
+	firewallIPs         *nftElementStorage
+	noEndpointServices  *nftElementStorage
+	noEndpointNodePorts *nftElementStorage
+	serviceNodePorts    *nftElementStorage
 }
 
 // Proxier implements proxy.Provider
@@ -203,7 +211,6 @@ var _ proxy.Provider = &Proxier{}
 // call fails.
 func NewProxier(ctx context.Context,
 	ipFamily v1.IPFamily,
-	sysctl utilsysctl.Interface,
 	syncPeriod time.Duration,
 	minSyncPeriod time.Duration,
 	masqueradeAll bool,
@@ -217,6 +224,11 @@ func NewProxier(ctx context.Context,
 	initOnly bool,
 ) (*Proxier, error) {
 	logger := klog.LoggerWithValues(klog.FromContext(ctx), "ipFamily", ipFamily)
+
+	nft, err := getNFTablesInterface(ipFamily)
+	if err != nil {
+		return nil, err
+	}
 
 	if initOnly {
 		logger.Info("System initialized and --init-only specified")
@@ -232,28 +244,18 @@ func NewProxier(ctx context.Context,
 
 	serviceHealthServer := healthcheck.NewServiceHealthServer(hostname, recorder, nodePortAddresses, healthzServer)
 
-	var nftablesFamily knftables.Family
-	if ipFamily == v1.IPv4Protocol {
-		nftablesFamily = knftables.IPv4Family
-	} else {
-		nftablesFamily = knftables.IPv6Family
-	}
-	nft, err := knftables.New(nftablesFamily, kubeProxyTable)
-	if err != nil {
-		return nil, err
-	}
-
 	proxier := &Proxier{
 		ipFamily:            ipFamily,
 		svcPortMap:          make(proxy.ServicePortMap),
 		serviceChanges:      proxy.NewServiceChangeTracker(newServiceInfo, ipFamily, recorder, nil),
 		endpointsMap:        make(proxy.EndpointsMap),
 		endpointsChanges:    proxy.NewEndpointsChangeTracker(hostname, newEndpointInfo, ipFamily, recorder, nil),
+		needFullSync:        true,
 		syncPeriod:          syncPeriod,
 		nftables:            nft,
 		masqueradeAll:       masqueradeAll,
 		masqueradeMark:      masqueradeMark,
-		conntrack:           conntrack.NewExec(utilexec.New()),
+		conntrack:           conntrack.New(),
 		localDetector:       localDetector,
 		hostname:            hostname,
 		nodeIP:              nodeIP,
@@ -264,13 +266,66 @@ func NewProxier(ctx context.Context,
 		networkInterfacer:   proxyutil.RealNetwork{},
 		staleChains:         make(map[string]time.Time),
 		logger:              logger,
+		clusterIPs:          newNFTElementStorage("set", clusterIPsSet),
+		serviceIPs:          newNFTElementStorage("map", serviceIPsMap),
+		firewallIPs:         newNFTElementStorage("map", firewallIPsMap),
+		noEndpointServices:  newNFTElementStorage("map", noEndpointServicesMap),
+		noEndpointNodePorts: newNFTElementStorage("map", noEndpointNodePortsMap),
+		serviceNodePorts:    newNFTElementStorage("map", serviceNodePortsMap),
 	}
 
 	burstSyncs := 2
 	logger.V(2).Info("NFTables sync params", "minSyncPeriod", minSyncPeriod, "syncPeriod", syncPeriod, "burstSyncs", burstSyncs)
-	proxier.syncRunner = async.NewBoundedFrequencyRunner("sync-runner", proxier.syncProxyRules, minSyncPeriod, syncPeriod, burstSyncs)
+	// We need to pass *some* maxInterval to NewBoundedFrequencyRunner. time.Hour is arbitrary.
+	proxier.syncRunner = async.NewBoundedFrequencyRunner("sync-runner", proxier.syncProxyRules, minSyncPeriod, time.Hour, burstSyncs)
 
 	return proxier, nil
+}
+
+// Create a knftables.Interface and check if we can use the nftables proxy mode on this host.
+func getNFTablesInterface(ipFamily v1.IPFamily) (knftables.Interface, error) {
+	var nftablesFamily knftables.Family
+	if ipFamily == v1.IPv4Protocol {
+		nftablesFamily = knftables.IPv4Family
+	} else {
+		nftablesFamily = knftables.IPv6Family
+	}
+
+	// We require (or rather, knftables.New does) that the nft binary be version 1.0.1
+	// or later, because versions before that would always attempt to parse the entire
+	// nft ruleset at startup, even if you were only operating on a single table.
+	// That's bad, because in some cases, new versions of nft have added new rule
+	// types in ways that triggered bugs in older versions of nft, causing them to
+	// crash. Thus, if kube-proxy used nft < 1.0.1, it could potentially get locked
+	// out of its rules because of something some other component had done in a
+	// completely different table.
+	nft, err := knftables.New(nftablesFamily, kubeProxyTable)
+	if err != nil {
+		return nil, err
+	}
+
+	// Likewise, we want to ensure that the host filesystem has nft >= 1.0.1, so that
+	// it's not possible that *our* rules break *the system's* nft. (In particular, we
+	// know that if kube-proxy uses nft >= 1.0.3 and the system has nft <= 0.9.8, that
+	// the system nft will become completely unusable.) Unfortunately, we can't easily
+	// figure out the version of nft installed on the host filesystem, so instead, we
+	// check the kernel version, under the assumption that the distro will have an nft
+	// binary that supports the same features as its kernel does, and so kernel 5.13
+	// or later implies nft 1.0.1 or later. https://issues.k8s.io/122743
+	//
+	// However, we allow the user to bypass this check by setting
+	// `KUBE_PROXY_NFTABLES_SKIP_KERNEL_VERSION_CHECK` to anything non-empty.
+	if os.Getenv("KUBE_PROXY_NFTABLES_SKIP_KERNEL_VERSION_CHECK") != "" {
+		kernelVersion, err := utilkernel.GetVersion()
+		if err != nil {
+			return nil, fmt.Errorf("could not check kernel version: %w", err)
+		}
+		if kernelVersion.LessThan(version.MustParseGeneric(utilkernel.NFTablesKubeProxyKernelVersion)) {
+			return nil, fmt.Errorf("kube-proxy in nftables mode requires kernel %s or later", utilkernel.NFTablesKubeProxyKernelVersion)
+		}
+	}
+
+	return nft, nil
 }
 
 // internal struct for string service information
@@ -381,8 +436,14 @@ var nftablesJumpChains = []nftablesJumpChain{
 // ensureChain adds commands to tx to ensure that chain exists and doesn't contain
 // anything from before this transaction (using createdChains to ensure that we don't
 // Flush a chain more than once and lose *new* rules as well.)
-func ensureChain(chain string, tx *knftables.Transaction, createdChains sets.Set[string]) {
+// If skipCreation is true, chain will not be added to the transaction, but will be added to the createdChains
+// for proper cleanup in the end of the sync iteration.
+func ensureChain(chain string, tx *knftables.Transaction, createdChains sets.Set[string], skipCreation bool) {
 	if createdChains.Has(chain) {
+		return
+	}
+	createdChains.Insert(chain)
+	if skipCreation {
 		return
 	}
 	tx.Add(&knftables.Chain{
@@ -391,7 +452,6 @@ func ensureChain(chain string, tx *knftables.Transaction, createdChains sets.Set
 	tx.Flush(&knftables.Chain{
 		Name: chain,
 	})
-	createdChains.Insert(chain)
 }
 
 func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
@@ -437,7 +497,7 @@ func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
 	// Create and flush ordinary chains and add rules jumping to them
 	createdChains := sets.New[string]()
 	for _, c := range nftablesJumpChains {
-		ensureChain(c.dstChain, tx, createdChains)
+		ensureChain(c.dstChain, tx, createdChains, false)
 		tx.Add(&knftables.Rule{
 			Chain: c.srcChain,
 			Rule: knftables.Concat(
@@ -449,7 +509,7 @@ func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
 
 	// Ensure all of our other "top-level" chains exist
 	for _, chain := range []string{servicesChain, clusterIPsCheckChain, masqueradingChain, markMasqChain} {
-		ensureChain(chain, tx, createdChains)
+		ensureChain(chain, tx, createdChains, false)
 	}
 
 	// Add the rules in the mark-for-masquerade and masquerading chains
@@ -599,7 +659,7 @@ func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
 		Comment: ptr.To("destinations that are subject to LoadBalancerSourceRanges"),
 	})
 
-	ensureChain(firewallCheckChain, tx, createdChains)
+	ensureChain(firewallCheckChain, tx, createdChains, false)
 	tx.Add(&knftables.Rule{
 		Chain: firewallCheckChain,
 		Rule: knftables.Concat(
@@ -646,6 +706,14 @@ func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
 			),
 		})
 	}
+
+	// flush containers
+	proxier.clusterIPs.reset(tx)
+	proxier.serviceIPs.reset(tx)
+	proxier.firewallIPs.reset(tx)
+	proxier.noEndpointServices.reset(tx)
+	proxier.noEndpointNodePorts.reset(tx)
+	proxier.serviceNodePorts.reset(tx)
 }
 
 // CleanupLeftovers removes all nftables rules and chains created by the Proxier
@@ -790,6 +858,7 @@ func (proxier *Proxier) OnNodeAdd(node *v1.Node) {
 	for k, v := range node.Labels {
 		proxier.nodeLabels[k] = v
 	}
+	proxier.needFullSync = true
 	proxier.mu.Unlock()
 	proxier.logger.V(4).Info("Updated proxier node labels", "labels", node.Labels)
 
@@ -814,6 +883,7 @@ func (proxier *Proxier) OnNodeUpdate(oldNode, node *v1.Node) {
 	for k, v := range node.Labels {
 		proxier.nodeLabels[k] = v
 	}
+	proxier.needFullSync = true
 	proxier.mu.Unlock()
 	proxier.logger.V(4).Info("Updated proxier node labels", "labels", node.Labels)
 
@@ -831,6 +901,7 @@ func (proxier *Proxier) OnNodeDelete(node *v1.Node) {
 
 	proxier.mu.Lock()
 	proxier.nodeLabels = nil
+	proxier.needFullSync = true
 	proxier.mu.Unlock()
 
 	proxier.Sync()
@@ -975,6 +1046,96 @@ func isAffinitySetName(set string) bool {
 	return strings.HasPrefix(set, servicePortEndpointAffinityNamePrefix)
 }
 
+// nftElementStorage is an internal representation of nftables map or set.
+type nftElementStorage struct {
+	elements      map[string]string
+	leftoverKeys  sets.Set[string]
+	containerType string
+	containerName string
+}
+
+// joinNFTSlice converts nft element key or value (type []string) to string to store in the nftElementStorage.
+// The separator is the same as the one used by nft commands, so we know that the parsing is going to be unambiguous.
+func joinNFTSlice(k []string) string {
+	return strings.Join(k, " . ")
+}
+
+// splitNFTSlice converts nftElementStorage key or value string representation back to slice.
+func splitNFTSlice(k string) []string {
+	return strings.Split(k, " . ")
+}
+
+// newNFTElementStorage creates an empty nftElementStorage.
+// nftElementStorage.reset() must be called before the first usage.
+func newNFTElementStorage(containerType, containerName string) *nftElementStorage {
+	c := &nftElementStorage{
+		elements:      make(map[string]string),
+		leftoverKeys:  sets.New[string](),
+		containerType: containerType,
+		containerName: containerName,
+	}
+	return c
+}
+
+// reset clears the internal state and flushes the nftables map/set.
+func (s *nftElementStorage) reset(tx *knftables.Transaction) {
+	clear(s.elements)
+	if s.containerType == "set" {
+		tx.Flush(&knftables.Set{
+			Name: s.containerName,
+		})
+	} else {
+		tx.Flush(&knftables.Map{
+			Name: s.containerName,
+		})
+	}
+	s.resetLeftoverKeys()
+}
+
+// resetLeftoverKeys is only called internally by nftElementStorage methods.
+func (s *nftElementStorage) resetLeftoverKeys() {
+	clear(s.leftoverKeys)
+	for key := range s.elements {
+		s.leftoverKeys.Insert(key)
+	}
+}
+
+// ensureElem adds elem to the transaction if elem is not present in the container, and updates internal
+// leftoverKeys set to track unused elements.
+func (s *nftElementStorage) ensureElem(tx *knftables.Transaction, elem *knftables.Element) {
+	newKey := joinNFTSlice(elem.Key)
+	newValue := joinNFTSlice(elem.Value)
+	existingValue, exists := s.elements[newKey]
+	if exists {
+		if existingValue != newValue {
+			// value is different, delete and re-add
+			tx.Delete(elem)
+			tx.Add(elem)
+			s.elements[newKey] = newValue
+		}
+		delete(s.leftoverKeys, newKey)
+	} else {
+		tx.Add(elem)
+		s.elements[newKey] = newValue
+	}
+}
+
+func (s *nftElementStorage) cleanupLeftoverKeys(tx *knftables.Transaction) {
+	for key := range s.leftoverKeys {
+		e := &knftables.Element{
+			Key: splitNFTSlice(key),
+		}
+		if s.containerType == "set" {
+			e.Set = s.containerName
+		} else {
+			e.Map = s.containerName
+		}
+		tx.Delete(e)
+		delete(s.elements, key)
+	}
+	s.resetLeftoverKeys()
+}
+
 // This is where all of the nftables calls happen.
 // This assumes proxier.mu is NOT held
 func (proxier *Proxier) syncProxyRules() {
@@ -991,10 +1152,19 @@ func (proxier *Proxier) syncProxyRules() {
 	// Below this point we will not return until we try to write the nftables rules.
 	//
 
+	// The value of proxier.needFullSync may change before the defer funcs run, so
+	// we need to keep track of whether it was set at the *start* of the sync.
+	tryPartialSync := !proxier.needFullSync
+
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
 		metrics.SyncProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		if tryPartialSync {
+			metrics.SyncPartialProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		} else {
+			metrics.SyncFullProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		}
 		proxier.logger.V(2).Info("SyncProxyRules complete", "elapsed", time.Since(start))
 	}()
 
@@ -1008,6 +1178,10 @@ func (proxier *Proxier) syncProxyRules() {
 		if !success {
 			proxier.logger.Info("Sync failed", "retryingTime", proxier.syncPeriod)
 			proxier.syncRunner.RetryAfter(proxier.syncPeriod)
+			// proxier.serviceChanges and proxier.endpointChanges have already
+			// been flushed, so we've lost the state needed to be able to do
+			// a partial sync.
+			proxier.needFullSync = true
 		}
 	}()
 
@@ -1041,7 +1215,9 @@ func (proxier *Proxier) syncProxyRules() {
 
 	// Now start the actual syncing transaction
 	tx := proxier.nftables.NewTransaction()
-	proxier.setupNFTables(tx)
+	if !tryPartialSync {
+		proxier.setupNFTables(tx)
+	}
 
 	// We need to use, eg, "ip daddr" for IPv4 but "ip6 daddr" for IPv6
 	ipX := "ip"
@@ -1050,26 +1226,6 @@ func (proxier *Proxier) syncProxyRules() {
 		ipX = "ip6"
 		ipvX_addr = "ipv6_addr"
 	}
-
-	// We currently fully-rebuild our sets and maps on each resync
-	tx.Flush(&knftables.Set{
-		Name: clusterIPsSet,
-	})
-	tx.Flush(&knftables.Map{
-		Name: firewallIPsMap,
-	})
-	tx.Flush(&knftables.Map{
-		Name: noEndpointServicesMap,
-	})
-	tx.Flush(&knftables.Map{
-		Name: noEndpointNodePortsMap,
-	})
-	tx.Flush(&knftables.Map{
-		Name: serviceIPsMap,
-	})
-	tx.Flush(&knftables.Map{
-		Name: serviceNodePortsMap,
-	})
 
 	// Accumulate service/endpoint chains and affinity sets to keep.
 	activeChains := sets.New[string]()
@@ -1094,6 +1250,7 @@ func (proxier *Proxier) syncProxyRules() {
 			proxier.logger.Error(nil, "Failed to cast serviceInfo", "serviceName", svcName)
 			continue
 		}
+
 		protocol := strings.ToLower(string(svcInfo.Protocol()))
 		svcPortNameString := svcInfo.nameString
 
@@ -1104,10 +1261,20 @@ func (proxier *Proxier) syncProxyRules() {
 		allEndpoints := proxier.endpointsMap[svcName]
 		clusterEndpoints, localEndpoints, allLocallyReachableEndpoints, hasEndpoints := proxy.CategorizeEndpoints(allEndpoints, svcInfo, proxier.nodeLabels)
 
+		// skipServiceUpdate is used for all service-related chains and their elements.
+		// If no changes were done to the service or its endpoints, these objects may be skipped.
+		skipServiceUpdate := tryPartialSync &&
+			!serviceUpdateResult.UpdatedServices.Has(svcName.NamespacedName) &&
+			!endpointUpdateResult.UpdatedServices.Has(svcName.NamespacedName)
+
 		// Note the endpoint chains that will be used
 		for _, ep := range allLocallyReachableEndpoints {
 			if epInfo, ok := ep.(*endpointInfo); ok {
-				ensureChain(epInfo.chainName, tx, activeChains)
+				ensureChain(epInfo.chainName, tx, activeChains, skipServiceUpdate)
+				// Note the affinity sets that will be used
+				if svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP {
+					activeAffinitySets.Insert(epInfo.affinitySetName)
+				}
 			}
 		}
 
@@ -1115,14 +1282,14 @@ func (proxier *Proxier) syncProxyRules() {
 		clusterPolicyChain := svcInfo.clusterPolicyChainName
 		usesClusterPolicyChain := len(clusterEndpoints) > 0 && svcInfo.UsesClusterEndpoints()
 		if usesClusterPolicyChain {
-			ensureChain(clusterPolicyChain, tx, activeChains)
+			ensureChain(clusterPolicyChain, tx, activeChains, skipServiceUpdate)
 		}
 
 		// localPolicyChain contains the endpoints used with "Local" traffic policy
 		localPolicyChain := svcInfo.localPolicyChainName
 		usesLocalPolicyChain := len(localEndpoints) > 0 && svcInfo.UsesLocalEndpoints()
 		if usesLocalPolicyChain {
-			ensureChain(localPolicyChain, tx, activeChains)
+			ensureChain(localPolicyChain, tx, activeChains, skipServiceUpdate)
 		}
 
 		// internalPolicyChain is the chain containing the endpoints for
@@ -1164,7 +1331,7 @@ func (proxier *Proxier) syncProxyRules() {
 		// are no externally-usable endpoints.
 		usesExternalTrafficChain := hasEndpoints && svcInfo.ExternallyAccessible()
 		if usesExternalTrafficChain {
-			ensureChain(externalTrafficChain, tx, activeChains)
+			ensureChain(externalTrafficChain, tx, activeChains, skipServiceUpdate)
 		}
 
 		var internalTrafficFilterVerdict, externalTrafficFilterVerdict string
@@ -1195,12 +1362,12 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 
 		// Capture the clusterIP.
-		tx.Add(&knftables.Element{
+		proxier.clusterIPs.ensureElem(tx, &knftables.Element{
 			Set: clusterIPsSet,
 			Key: []string{svcInfo.ClusterIP().String()},
 		})
 		if hasInternalEndpoints {
-			tx.Add(&knftables.Element{
+			proxier.serviceIPs.ensureElem(tx, &knftables.Element{
 				Map: serviceIPsMap,
 				Key: []string{
 					svcInfo.ClusterIP().String(),
@@ -1213,7 +1380,7 @@ func (proxier *Proxier) syncProxyRules() {
 			})
 		} else {
 			// No endpoints.
-			tx.Add(&knftables.Element{
+			proxier.noEndpointServices.ensureElem(tx, &knftables.Element{
 				Map: noEndpointServicesMap,
 				Key: []string{
 					svcInfo.ClusterIP().String(),
@@ -1232,7 +1399,7 @@ func (proxier *Proxier) syncProxyRules() {
 			if hasEndpoints {
 				// Send traffic bound for external IPs to the "external
 				// destinations" chain.
-				tx.Add(&knftables.Element{
+				proxier.serviceIPs.ensureElem(tx, &knftables.Element{
 					Map: serviceIPsMap,
 					Key: []string{
 						externalIP.String(),
@@ -1248,7 +1415,7 @@ func (proxier *Proxier) syncProxyRules() {
 				// Either no endpoints at all (REJECT) or no endpoints for
 				// external traffic (DROP anything that didn't get
 				// short-circuited by the EXT chain.)
-				tx.Add(&knftables.Element{
+				proxier.noEndpointServices.ensureElem(tx, &knftables.Element{
 					Map: noEndpointServicesMap,
 					Key: []string{
 						externalIP.String(),
@@ -1266,41 +1433,13 @@ func (proxier *Proxier) syncProxyRules() {
 		usesFWChain := len(svcInfo.LoadBalancerVIPs()) > 0 && len(svcInfo.LoadBalancerSourceRanges()) > 0
 		fwChain := svcInfo.firewallChainName
 		if usesFWChain {
-			ensureChain(fwChain, tx, activeChains)
-			var sources []string
-			allowFromNode := false
-			for _, cidr := range svcInfo.LoadBalancerSourceRanges() {
-				if len(sources) > 0 {
-					sources = append(sources, ",")
-				}
-				sources = append(sources, cidr.String())
-				if cidr.Contains(proxier.nodeIP) {
-					allowFromNode = true
-				}
-			}
-			// For VIP-like LBs, the VIP is often added as a local
-			// address (via an IP route rule).  In that case, a request
-			// from a node to the VIP will not hit the loadbalancer but
-			// will loop back with the source IP set to the VIP.  We
-			// need the following rules to allow requests from this node.
-			if allowFromNode {
-				for _, lbip := range svcInfo.LoadBalancerVIPs() {
-					sources = append(sources, ",", lbip.String())
-				}
-			}
-			tx.Add(&knftables.Rule{
-				Chain: fwChain,
-				Rule: knftables.Concat(
-					ipX, "saddr", "!=", "{", sources, "}",
-					"drop",
-				),
-			})
+			ensureChain(fwChain, tx, activeChains, skipServiceUpdate)
 		}
 
 		// Capture load-balancer ingress.
 		for _, lbip := range svcInfo.LoadBalancerVIPs() {
 			if hasEndpoints {
-				tx.Add(&knftables.Element{
+				proxier.serviceIPs.ensureElem(tx, &knftables.Element{
 					Map: serviceIPsMap,
 					Key: []string{
 						lbip.String(),
@@ -1314,7 +1453,7 @@ func (proxier *Proxier) syncProxyRules() {
 			}
 
 			if usesFWChain {
-				tx.Add(&knftables.Element{
+				proxier.firewallIPs.ensureElem(tx, &knftables.Element{
 					Map: firewallIPsMap,
 					Key: []string{
 						lbip.String(),
@@ -1324,7 +1463,6 @@ func (proxier *Proxier) syncProxyRules() {
 					Value: []string{
 						fmt.Sprintf("goto %s", fwChain),
 					},
-					Comment: &svcPortNameString,
 				})
 			}
 		}
@@ -1333,7 +1471,7 @@ func (proxier *Proxier) syncProxyRules() {
 			// external traffic (DROP anything that didn't get short-circuited
 			// by the EXT chain.)
 			for _, lbip := range svcInfo.LoadBalancerVIPs() {
-				tx.Add(&knftables.Element{
+				proxier.noEndpointServices.ensureElem(tx, &knftables.Element{
 					Map: noEndpointServicesMap,
 					Key: []string{
 						lbip.String(),
@@ -1352,9 +1490,9 @@ func (proxier *Proxier) syncProxyRules() {
 		if svcInfo.NodePort() != 0 {
 			if hasEndpoints {
 				// Jump to the external destination chain.  For better or for
-				// worse, nodeports are not subect to loadBalancerSourceRanges,
+				// worse, nodeports are not subject to loadBalancerSourceRanges,
 				// and we can't change that.
-				tx.Add(&knftables.Element{
+				proxier.serviceNodePorts.ensureElem(tx, &knftables.Element{
 					Map: serviceNodePortsMap,
 					Key: []string{
 						protocol,
@@ -1369,7 +1507,7 @@ func (proxier *Proxier) syncProxyRules() {
 				// Either no endpoints at all (REJECT) or no endpoints for
 				// external traffic (DROP anything that didn't get
 				// short-circuited by the EXT chain.)
-				tx.Add(&knftables.Element{
+				proxier.noEndpointNodePorts.ensureElem(tx, &knftables.Element{
 					Map: noEndpointNodePortsMap,
 					Key: []string{
 						protocol,
@@ -1381,6 +1519,12 @@ func (proxier *Proxier) syncProxyRules() {
 					Comment: &svcPortNameString,
 				})
 			}
+		}
+
+		// All the following operations are service-chain related and may be skipped if no svc or endpoint
+		// changes are required.
+		if skipServiceUpdate {
+			continue
 		}
 
 		// Set up internal traffic handling.
@@ -1481,6 +1625,37 @@ func (proxier *Proxier) syncProxyRules() {
 			}
 		}
 
+		if usesFWChain {
+			var sources []string
+			allowFromNode := false
+			for _, cidr := range svcInfo.LoadBalancerSourceRanges() {
+				if len(sources) > 0 {
+					sources = append(sources, ",")
+				}
+				sources = append(sources, cidr.String())
+				if cidr.Contains(proxier.nodeIP) {
+					allowFromNode = true
+				}
+			}
+			// For VIP-like LBs, the VIP is often added as a local
+			// address (via an IP route rule).  In that case, a request
+			// from a node to the VIP will not hit the loadbalancer but
+			// will loop back with the source IP set to the VIP.  We
+			// need the following rules to allow requests from this node.
+			if allowFromNode {
+				for _, lbip := range svcInfo.LoadBalancerVIPs() {
+					sources = append(sources, ",", lbip.String())
+				}
+			}
+			tx.Add(&knftables.Rule{
+				Chain: fwChain,
+				Rule: knftables.Concat(
+					ipX, "saddr", "!=", "{", sources, "}",
+					"drop",
+				),
+			})
+		}
+
 		if svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP {
 			// Generate the per-endpoint affinity sets
 			for _, ep := range allLocallyReachableEndpoints {
@@ -1514,20 +1689,19 @@ func (proxier *Proxier) syncProxyRules() {
 					},
 					Timeout: ptr.To(time.Duration(svcInfo.StickyMaxAgeSeconds()) * time.Second),
 				})
-				activeAffinitySets.Insert(epInfo.affinitySetName)
 			}
 		}
 
 		// If Cluster policy is in use, create the chain and create rules jumping
 		// from clusterPolicyChain to the clusterEndpoints
 		if usesClusterPolicyChain {
-			proxier.writeServiceToEndpointRules(tx, svcPortNameString, svcInfo, clusterPolicyChain, clusterEndpoints)
+			proxier.writeServiceToEndpointRules(tx, svcInfo, clusterPolicyChain, clusterEndpoints)
 		}
 
 		// If Local policy is in use, create rules jumping from localPolicyChain
 		// to the localEndpoints
 		if usesLocalPolicyChain {
-			proxier.writeServiceToEndpointRules(tx, svcPortNameString, svcInfo, localPolicyChain, localEndpoints)
+			proxier.writeServiceToEndpointRules(tx, svcInfo, localPolicyChain, localEndpoints)
 		}
 
 		// Generate the per-endpoint chains
@@ -1609,6 +1783,13 @@ func (proxier *Proxier) syncProxyRules() {
 		proxier.logger.Error(err, "Failed to list nftables sets: stale affinity sets will not be deleted")
 	}
 
+	proxier.clusterIPs.cleanupLeftoverKeys(tx)
+	proxier.serviceIPs.cleanupLeftoverKeys(tx)
+	proxier.firewallIPs.cleanupLeftoverKeys(tx)
+	proxier.noEndpointServices.cleanupLeftoverKeys(tx)
+	proxier.noEndpointNodePorts.cleanupLeftoverKeys(tx)
+	proxier.serviceNodePorts.cleanupLeftoverKeys(tx)
+
 	// Sync rules.
 	proxier.logger.V(2).Info("Reloading service nftables data",
 		"numServices", len(proxier.svcPortMap),
@@ -1630,6 +1811,7 @@ func (proxier *Proxier) syncProxyRules() {
 		return
 	}
 	success = true
+	proxier.needFullSync = false
 
 	for name, lastChangeTriggerTimes := range endpointUpdateResult.LastChangeTriggerTimes {
 		for _, lastChangeTriggerTime := range lastChangeTriggerTimes {
@@ -1657,10 +1839,10 @@ func (proxier *Proxier) syncProxyRules() {
 	}
 
 	// Finish housekeeping, clear stale conntrack entries for UDP Services
-	conntrack.CleanStaleEntries(proxier.conntrack, proxier.svcPortMap, serviceUpdateResult, endpointUpdateResult)
+	conntrack.CleanStaleEntries(proxier.conntrack, proxier.ipFamily, proxier.svcPortMap, serviceUpdateResult, endpointUpdateResult)
 }
 
-func (proxier *Proxier) writeServiceToEndpointRules(tx *knftables.Transaction, svcPortNameString string, svcInfo *servicePortInfo, svcChain string, endpoints []proxy.Endpoint) {
+func (proxier *Proxier) writeServiceToEndpointRules(tx *knftables.Transaction, svcInfo *servicePortInfo, svcChain string, endpoints []proxy.Endpoint) {
 	// First write session affinity rules, if applicable.
 	if svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP {
 		ipX := "ip"

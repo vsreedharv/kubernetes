@@ -1055,6 +1055,14 @@
     pod. Modify the labels of one of the Job's Pods. The Job MUST release the Pod.
   release: v1.16
   file: test/e2e/apps/job.go
+- testname: Verify Pod Failure policy allows to fail job early on exit code.
+  codename: '[sig-apps] Job should allow to use the pod failure policy on exit code
+    to fail the job early [Conformance]'
+  description: Create a job with pod failure policy, and exactly one pod failing.
+    The exit code of the failed pod matches the pod failure policy triggering the
+    Job failure.
+  release: v1.31
+  file: test/e2e/apps/job.go
 - testname: Jobs, apply changes to status
   codename: '[sig-apps] Job should apply changes to a job status [Conformance]'
   description: Attempt to create a running Job which MUST succeed. Attempt to patch
@@ -2221,15 +2229,14 @@
   file: test/e2e/common/node/kubelet.go
 - testname: Kubelet, managed etc hosts
   codename: '[sig-node] KubeletManagedEtcHosts should test kubelet managed /etc/hosts
-    file [LinuxOnly] [NodeConformance] [Conformance]'
+    file [NodeConformance] [Conformance]'
   description: Create a Pod with containers with hostNetwork set to false, one of
     the containers mounts the /etc/hosts file form the host. Create a second Pod with
     hostNetwork set to true. 1. The Pod with hostNetwork=false MUST have /etc/hosts
     of containers managed by the Kubelet. 2. The Pod with hostNetwork=false but the
     container mounts /etc/hosts file from the host. The /etc/hosts file MUST not be
     managed by the Kubelet. 3. The Pod with hostNetwork=true , /etc/hosts file MUST
-    not be managed by the Kubelet. This test is marked LinuxOnly since Windows cannot
-    mount individual files in Containers.
+    not be managed by the Kubelet.
   release: v1.9
   file: test/e2e/common/node/kubelet_etc_hosts.go
 - testname: lease API should be available
@@ -2260,6 +2267,15 @@
     be evicted if the taint is removed before toleration time ends.
   release: v1.16
   file: test/e2e/node/taints.go
+- testname: Node, resource lifecycle
+  codename: '[sig-node] Node Lifecycle should run through the lifecycle of a node
+    [Conformance]'
+  description: Creating and Reading a Node MUST succeed with required name retrieved.
+    Patching a Node MUST succeed with its new label found. Listing Nodes with a labelSelector
+    MUST succeed with only a single node found. Updating a Node MUST succeed with
+    its new label found. Deleting the Node MUST succeed and its deletion MUST be confirmed.
+  release: v1.32
+  file: test/e2e/node/node_lifecycle.go
 - testname: PodTemplate, delete a collection
   codename: '[sig-node] PodTemplates should delete a collection of pod templates [Conformance]'
   description: A set of Pod Templates is created with a label selector which MUST
@@ -2640,21 +2656,21 @@
   file: test/e2e/common/node/expansion.go
 - testname: VolumeSubpathEnvExpansion, subpath with absolute path
   codename: '[sig-node] Variable Expansion should fail substituting values in a volume
-    subpath with absolute path [Slow] [Conformance]'
+    subpath with absolute path [Conformance]'
   description: Make sure a container's subpath can not be set using an expansion of
     environment variables when absolute path is supplied.
   release: v1.19
   file: test/e2e/common/node/expansion.go
 - testname: VolumeSubpathEnvExpansion, subpath with backticks
   codename: '[sig-node] Variable Expansion should fail substituting values in a volume
-    subpath with backticks [Slow] [Conformance]'
+    subpath with backticks [Conformance]'
   description: Make sure a container's subpath can not be set using an expansion of
     environment variables when backticks are supplied.
   release: v1.19
   file: test/e2e/common/node/expansion.go
 - testname: VolumeSubpathEnvExpansion, subpath test writes
   codename: '[sig-node] Variable Expansion should succeed in writing subpaths in container
-    [Slow] [Conformance]'
+    [Conformance]'
   description: "Verify that a subpath expansion can be used to write files into subpaths.
     1.\tvalid subpathexpr starts a container running 2.\ttest for valid subpath writes
     3.\tsuccessful expansion of the subpathexpr isn't required for volume cleanup"
@@ -2749,6 +2765,15 @@
     found, the scheduler MUST preempt a lower priority pod to schedule the critical
     pod.
   release: v1.19
+  file: test/e2e/scheduling/preemption.go
+- testname: Verify the DisruptionTarget condition is added to the preempted pod
+  codename: '[sig-scheduling] SchedulerPreemption [Serial] validates pod disruption
+    condition is added to the preempted pod [Conformance]'
+  description: ' 1. Run a low priority pod with finalizer which consumes 1/1 of node
+    resources 2. Schedule a higher priority pod which also consumes 1/1 of node resources
+    3. See if the pod with lower priority is preempted and has the pod disruption
+    condition 4. Remove the finalizer so that the pod can be deleted by GC'
+  release: v1.31
   file: test/e2e/scheduling/preemption.go
 - testname: CSIDriver, lifecycle
   codename: '[sig-storage] CSIInlineVolumes should run through the lifecycle of a

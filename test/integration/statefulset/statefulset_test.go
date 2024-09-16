@@ -55,7 +55,7 @@ const (
 // TestVolumeTemplateNoopUpdate ensures embedded StatefulSet objects with embedded PersistentVolumes can be updated
 func TestVolumeTemplateNoopUpdate(t *testing.T) {
 	// Start the server with default storage setup
-	server := apiservertesting.StartTestServerOrDie(t, nil, nil, framework.SharedEtcd())
+	server := apiservertesting.StartTestServerOrDie(t, nil, framework.DefaultTestServerFlags(), framework.SharedEtcd())
 	defer server.TearDownFn()
 
 	c, err := dynamic.NewForConfig(server.ClientConfig)
@@ -694,7 +694,6 @@ func TestStatefulSetStartOrdinal(t *testing.T) {
 		},
 	}
 
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetStartOrdinal, true)
 	tCtx, closeFn, rm, informers, c := scSetup(t)
 	defer closeFn()
 	cancel := runControllerAndInformers(tCtx, rm, informers)

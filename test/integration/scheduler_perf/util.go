@@ -80,29 +80,28 @@ func newDefaultComponentConfig() (*config.KubeSchedulerConfiguration, error) {
 // Notes on rate limiter:
 //   - client rate limit is set to 5000.
 func mustSetupCluster(tCtx ktesting.TContext, config *config.KubeSchedulerConfiguration, enabledFeatures map[featuregate.Feature]bool, outOfTreePluginRegistry frameworkruntime.Registry) (informers.SharedInformerFactory, ktesting.TContext) {
-	// Run API server with minimimal logging by default. Can be raised with -v.
-	framework.MinVerbosity = 0
-
 	// No alpha APIs (overrides api/all=true in https://github.com/kubernetes/kubernetes/blob/d647d19f6aef811bace300eec96a67644ff303d4/staging/src/k8s.io/apiextensions-apiserver/pkg/cmd/server/testing/testserver.go#L136),
 	// except for DRA API group when needed.
 	runtimeConfig := []string{"api/alpha=false"}
 	if enabledFeatures[features.DynamicResourceAllocation] {
-		runtimeConfig = append(runtimeConfig, "resource.k8s.io/v1alpha2=true")
+		runtimeConfig = append(runtimeConfig, "resource.k8s.io/v1alpha3=true")
 	}
 	customFlags := []string{
 		// Disable ServiceAccount admission plugin as we don't have serviceaccount controller running.
 		"--disable-admission-plugins=ServiceAccount,TaintNodesByCondition,Priority",
 		"--runtime-config=" + strings.Join(runtimeConfig, ","),
 	}
-	server, err := apiservertesting.StartTestServer(tCtx, apiservertesting.NewDefaultTestServerOptions(), customFlags, framework.SharedEtcd())
+	serverOpts := apiservertesting.NewDefaultTestServerOptions()
+	// Timeout sufficiently long to handle deleting pods of the largest test cases.
+	serverOpts.RequestTimeout = 10 * time.Minute
+	server, err := apiservertesting.StartTestServer(tCtx, serverOpts, customFlags, framework.SharedEtcd())
 	if err != nil {
 		tCtx.Fatalf("start apiserver: %v", err)
 	}
+	// Cleanup will be in reverse order: first the clients by canceling the
+	// child context (happens automatically), then the server.
 	tCtx.Cleanup(server.TearDownFn)
-
-	// Cleanup will be in reverse order: first the clients get cancelled,
-	// then the apiserver is torn down via the automatic cancelation of
-	// tCtx.
+	tCtx = ktesting.WithCancel(tCtx)
 
 	// TODO: client connection configuration, such as QPS or Burst is configurable in theory, this could be derived from the `config`, need to
 	// support this when there is any testcase that depends on such configuration.
@@ -264,22 +263,37 @@ func newMetricsCollector(config *metricsCollectorConfig, labels map[string]strin
 	}
 }
 
+func (mc *metricsCollector) init() error {
+	// Reset the metrics so that the measurements do not interfere with those collected during the previous steps.
+	m, err := legacyregistry.DefaultGatherer.Gather()
+	if err != nil {
+		return fmt.Errorf("failed to gather metrics to reset: %w", err)
+	}
+	for _, mFamily := range m {
+		// Reset only metrics defined in the collector.
+		if _, ok := mc.Metrics[mFamily.GetName()]; ok {
+			mFamily.Reset()
+		}
+	}
+	return nil
+}
+
 func (*metricsCollector) run(tCtx ktesting.TContext) {
 	// metricCollector doesn't need to start before the tests, so nothing to do here.
 }
 
-func (pc *metricsCollector) collect() []DataItem {
+func (mc *metricsCollector) collect() []DataItem {
 	var dataItems []DataItem
-	for metric, labelValsSlice := range pc.Metrics {
+	for metric, labelValsSlice := range mc.Metrics {
 		// no filter is specified, aggregate all the metrics within the same metricFamily.
 		if labelValsSlice == nil {
-			dataItem := collectHistogramVec(metric, pc.labels, nil)
+			dataItem := collectHistogramVec(metric, mc.labels, nil)
 			if dataItem != nil {
 				dataItems = append(dataItems, *dataItem)
 			}
 		} else {
 			for _, lvMap := range uniqueLVCombos(labelValsSlice) {
-				dataItem := collectHistogramVec(metric, pc.labels, lvMap)
+				dataItem := collectHistogramVec(metric, mc.labels, lvMap)
 				if dataItem != nil {
 					dataItems = append(dataItems, *dataItem)
 				}
@@ -328,7 +342,6 @@ func collectHistogramVec(metric string, labels map[string]string, lvMap map[stri
 	}
 
 	if vec.GetAggregatedSampleCount() == 0 {
-		klog.InfoS("It is expected that this metric wasn't recorded. The data for this metric won't be stored in a benchmark result file", "metric", metric, "labels", labels)
 		return nil
 	}
 
@@ -369,13 +382,17 @@ type throughputCollector struct {
 	errorMargin           float64
 }
 
-func newThroughputCollector(tb ktesting.TB, podInformer coreinformers.PodInformer, labels map[string]string, namespaces []string, errorMargin float64) *throughputCollector {
+func newThroughputCollector(podInformer coreinformers.PodInformer, labels map[string]string, namespaces []string, errorMargin float64) *throughputCollector {
 	return &throughputCollector{
 		podInformer: podInformer,
 		labels:      labels,
 		namespaces:  namespaces,
 		errorMargin: errorMargin,
 	}
+}
+
+func (tc *throughputCollector) init() error {
+	return nil
 }
 
 func (tc *throughputCollector) run(tCtx ktesting.TContext) {
@@ -431,22 +448,21 @@ func (tc *throughputCollector) run(tCtx ktesting.TContext) {
 			// be scheduled immediately when the timer
 			// triggers. Instead we track the actual time stamps.
 			duration := now.Sub(lastSampleTime)
-			durationInSeconds := duration.Seconds()
-			throughput := float64(newScheduled) / durationInSeconds
 			expectedDuration := throughputSampleInterval * time.Duration(skipped+1)
 			errorMargin := (duration - expectedDuration).Seconds() / expectedDuration.Seconds() * 100
 			if tc.errorMargin > 0 && math.Abs(errorMargin) > tc.errorMargin {
 				// This might affect the result, report it.
-				tCtx.Errorf("ERROR: Expected throuput collector to sample at regular time intervals. The %d most recent intervals took %s instead of %s, a difference of %0.1f%%.", skipped+1, duration, expectedDuration, errorMargin)
+				klog.Infof("WARNING: Expected throughput collector to sample at regular time intervals. The %d most recent intervals took %s instead of %s, a difference of %0.1f%%.", skipped+1, duration, expectedDuration, errorMargin)
 			}
 
 			// To keep percentiles accurate, we have to record multiple samples with the same
 			// throughput value if we skipped some intervals.
+			throughput := float64(newScheduled) / duration.Seconds()
 			for i := 0; i <= skipped; i++ {
 				tc.schedulingThroughputs = append(tc.schedulingThroughputs, throughput)
 			}
 			lastScheduledCount = scheduled
-			klog.Infof("%d pods scheduled", lastScheduledCount)
+			klog.Infof("%d pods have been scheduled successfully", lastScheduledCount)
 			skipped = 0
 			lastSampleTime = now
 		}

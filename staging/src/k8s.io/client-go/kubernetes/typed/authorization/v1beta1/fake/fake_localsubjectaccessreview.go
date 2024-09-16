@@ -19,7 +19,7 @@ limitations under the License.
 package fake
 
 import (
-	"context"
+	context "context"
 
 	v1beta1 "k8s.io/api/authorization/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +40,7 @@ var localsubjectaccessreviewsKind = v1beta1.SchemeGroupVersion.WithKind("LocalSu
 func (c *FakeLocalSubjectAccessReviews) Create(ctx context.Context, localSubjectAccessReview *v1beta1.LocalSubjectAccessReview, opts v1.CreateOptions) (result *v1beta1.LocalSubjectAccessReview, err error) {
 	emptyResult := &v1beta1.LocalSubjectAccessReview{}
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(localsubjectaccessreviewsResource, c.ns, localSubjectAccessReview), emptyResult)
+		Invokes(testing.NewCreateActionWithOptions(localsubjectaccessreviewsResource, c.ns, localSubjectAccessReview, opts), emptyResult)
 
 	if obj == nil {
 		return emptyResult, err

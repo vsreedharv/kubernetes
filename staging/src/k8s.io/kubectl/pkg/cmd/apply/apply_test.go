@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,6 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/openapi"
 	"k8s.io/utils/ptr"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/yaml"
 )
 
@@ -3432,7 +3432,7 @@ func TestApplySetDryRun(t *testing.T) {
 			cmd.Run(cmd, []string{})
 		})
 		assert.Equal(t, "replicationcontroller/test-rc serverside-applied (server dry run)\n", outbuff.String())
-		assert.Equal(t, len(serverSideData), 1, "unexpected creation")
+		assert.Len(t, serverSideData, 1, "unexpected creation")
 		require.Nil(t, serverSideData[pathSecret], "secret was created")
 	})
 
@@ -3449,7 +3449,7 @@ func TestApplySetDryRun(t *testing.T) {
 			cmd.Run(cmd, []string{})
 		})
 		assert.Equal(t, "replicationcontroller/test-rc configured (dry run)\n", outbuff.String())
-		assert.Equal(t, len(serverSideData), 1, "unexpected creation")
+		assert.Len(t, serverSideData, 1, "unexpected creation")
 		require.Nil(t, serverSideData[pathSecret], "secret was created")
 	})
 }

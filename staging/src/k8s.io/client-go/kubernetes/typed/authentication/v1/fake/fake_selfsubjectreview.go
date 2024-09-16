@@ -19,7 +19,7 @@ limitations under the License.
 package fake
 
 import (
-	"context"
+	context "context"
 
 	v1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,7 +39,7 @@ var selfsubjectreviewsKind = v1.SchemeGroupVersion.WithKind("SelfSubjectReview")
 func (c *FakeSelfSubjectReviews) Create(ctx context.Context, selfSubjectReview *v1.SelfSubjectReview, opts metav1.CreateOptions) (result *v1.SelfSubjectReview, err error) {
 	emptyResult := &v1.SelfSubjectReview{}
 	obj, err := c.Fake.
-		Invokes(testing.NewRootCreateAction(selfsubjectreviewsResource, selfSubjectReview), emptyResult)
+		Invokes(testing.NewRootCreateActionWithOptions(selfsubjectreviewsResource, selfSubjectReview, opts), emptyResult)
 	if obj == nil {
 		return emptyResult, err
 	}

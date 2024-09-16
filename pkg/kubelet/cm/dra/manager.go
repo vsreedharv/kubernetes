@@ -22,7 +22,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	resourceapi "k8s.io/api/resource/v1alpha2"
+	resourceapi "k8s.io/api/resource/v1alpha3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -30,8 +30,9 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/resourceclaim"
 	"k8s.io/klog/v2"
-	drapb "k8s.io/kubelet/pkg/apis/dra/v1alpha3"
+	drapb "k8s.io/kubelet/pkg/apis/dra/v1alpha4"
 	dra "k8s.io/kubernetes/pkg/kubelet/cm/dra/plugin"
+	"k8s.io/kubernetes/pkg/kubelet/cm/dra/state"
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 )
@@ -45,7 +46,7 @@ const defaultReconcilePeriod = 60 * time.Second
 // ActivePodsFunc is a function that returns a list of pods to reconcile.
 type ActivePodsFunc func() []*v1.Pod
 
-// ManagerImpl is the structure in charge of managing DRA resource Plugins.
+// ManagerImpl is the structure in charge of managing DRA drivers.
 type ManagerImpl struct {
 	// cache contains cached claim info
 	cache *claimInfoCache
@@ -67,8 +68,6 @@ type ManagerImpl struct {
 
 // NewManagerImpl creates a new manager.
 func NewManagerImpl(kubeClient clientset.Interface, stateFileDirectory string, nodeName types.NodeName) (*ManagerImpl, error) {
-	klog.V(2).InfoS("Creating DRA manager")
-
 	claimInfoCache, err := newClaimInfoCache(stateFileDirectory, draManagerStateFileName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create claimInfo cache: %+v", err)
@@ -90,15 +89,16 @@ func NewManagerImpl(kubeClient clientset.Interface, stateFileDirectory string, n
 }
 
 // Start starts the reconcile loop of the manager.
-func (m *ManagerImpl) Start(activePods ActivePodsFunc, sourcesReady config.SourcesReady) error {
+func (m *ManagerImpl) Start(ctx context.Context, activePods ActivePodsFunc, sourcesReady config.SourcesReady) error {
 	m.activePods = activePods
 	m.sourcesReady = sourcesReady
-	go wait.Until(func() { m.reconcileLoop() }, m.reconcilePeriod, wait.NeverStop)
+	go wait.UntilWithContext(ctx, func(ctx context.Context) { m.reconcileLoop(ctx) }, m.reconcilePeriod)
 	return nil
 }
 
 // reconcileLoop ensures that any stale state in the manager's claimInfoCache gets periodically reconciled.
-func (m *ManagerImpl) reconcileLoop() {
+func (m *ManagerImpl) reconcileLoop(ctx context.Context) {
+	logger := klog.FromContext(ctx)
 	// Only once all sources are ready do we attempt to reconcile.
 	// This ensures that the call to m.activePods() below will succeed with
 	// the actual active pods list.
@@ -139,22 +139,23 @@ func (m *ManagerImpl) reconcileLoop() {
 
 	// Loop through all inactive pods and call UnprepareResources on them.
 	for _, podClaims := range inactivePodClaims {
-		if err := m.unprepareResources(podClaims.uid, podClaims.namespace, podClaims.claimNames); err != nil {
-			klog.ErrorS(err, "Unpreparing pod resources in reconcile loop", "podUID", podClaims.uid)
+		if err := m.unprepareResources(ctx, podClaims.uid, podClaims.namespace, podClaims.claimNames); err != nil {
+			logger.Info("Unpreparing pod resources in reconcile loop failed, will retry", "podUID", podClaims.uid, "err", err)
 		}
 	}
 }
 
-// PrepareResources attempts to prepare all of the required resource
-// plugin resources for the input container, issue NodePrepareResources rpc requests
+// PrepareResources attempts to prepare all of the required resources
+// for the input container, issue NodePrepareResources rpc requests
 // for each new resource requirement, process their responses and update the cached
 // containerResources on success.
-func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
+func (m *ManagerImpl) PrepareResources(ctx context.Context, pod *v1.Pod) error {
+	logger := klog.FromContext(ctx)
 	batches := make(map[string][]*drapb.Claim)
 	resourceClaims := make(map[types.UID]*resourceapi.ResourceClaim)
 	for i := range pod.Spec.ResourceClaims {
 		podClaim := &pod.Spec.ResourceClaims[i]
-		klog.V(3).InfoS("Processing resource", "podClaim", podClaim.Name, "pod", pod.Name)
+		logger.V(3).Info("Processing resource", "pod", klog.KObj(pod), "podClaim", podClaim.Name)
 		claimName, mustCheckOwner, err := resourceclaim.Name(pod, podClaim)
 		if err != nil {
 			return fmt.Errorf("prepare resource claim: %v", err)
@@ -162,11 +163,12 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 
 		if claimName == nil {
 			// Nothing to do.
+			logger.V(5).Info("No need to prepare resources, no claim generated", "pod", klog.KObj(pod), "podClaim", podClaim.Name)
 			continue
 		}
 		// Query claim object from the API server
-		resourceClaim, err := m.kubeClient.ResourceV1alpha2().ResourceClaims(pod.Namespace).Get(
-			context.TODO(),
+		resourceClaim, err := m.kubeClient.ResourceV1alpha3().ResourceClaims(pod.Namespace).Get(
+			ctx,
 			*claimName,
 			metav1.GetOptions{})
 		if err != nil {
@@ -185,20 +187,20 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 				pod.Name, pod.UID, *claimName, resourceClaim.UID)
 		}
 
-		// If no container actually uses the claim, then we don't need
-		// to prepare it.
-		if !claimIsUsedByPod(podClaim, pod) {
-			klog.V(5).InfoS("Skipping unused resource", "claim", claimName, "pod", pod.Name)
-			continue
-		}
-
 		// Atomically perform some operations on the claimInfo cache.
 		err = m.cache.withLock(func() error {
 			// Get a reference to the claim info for this claim from the cache.
 			// If there isn't one yet, then add it to the cache.
 			claimInfo, exists := m.cache.get(resourceClaim.Name, resourceClaim.Namespace)
 			if !exists {
-				claimInfo = m.cache.add(newClaimInfoFromClaim(resourceClaim))
+				ci, err := newClaimInfoFromClaim(resourceClaim)
+				if err != nil {
+					return fmt.Errorf("claim %s: %w", klog.KObj(resourceClaim), err)
+				}
+				claimInfo = m.cache.add(ci)
+				logger.V(6).Info("Created new claim info cache entry", "pod", klog.KObj(pod), "podClaim", podClaim.Name, "claim", klog.KObj(resourceClaim), "claimInfoEntry", claimInfo)
+			} else {
+				logger.V(6).Info("Found existing claim info cache entry", "pod", klog.KObj(pod), "podClaim", podClaim.Name, "claim", klog.KObj(resourceClaim), "claimInfoEntry", claimInfo)
 			}
 
 			// Add a reference to the current pod in the claim info.
@@ -214,6 +216,7 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 
 			// If this claim is already prepared, there is no need to prepare it again.
 			if claimInfo.isPrepared() {
+				logger.V(5).Info("Resources already prepared", "pod", klog.KObj(pod), "podClaim", podClaim.Name, "claim", klog.KObj(resourceClaim))
 				return nil
 			}
 
@@ -221,19 +224,14 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 			// after NodePrepareResources GRPC succeeds
 			resourceClaims[claimInfo.ClaimUID] = resourceClaim
 
-			// Loop through all plugins and prepare for calling NodePrepareResources.
-			for _, resourceHandle := range claimInfo.ResourceHandles {
-				claim := &drapb.Claim{
-					Namespace:      claimInfo.Namespace,
-					Uid:            string(claimInfo.ClaimUID),
-					Name:           claimInfo.ClaimName,
-					ResourceHandle: resourceHandle.Data,
-				}
-				if resourceHandle.StructuredData != nil {
-					claim.StructuredResourceHandle = []*resourceapi.StructuredResourceHandle{resourceHandle.StructuredData}
-				}
-				pluginName := resourceHandle.DriverName
-				batches[pluginName] = append(batches[pluginName], claim)
+			// Loop through all drivers and prepare for calling NodePrepareResources.
+			claim := &drapb.Claim{
+				Namespace: claimInfo.Namespace,
+				UID:       string(claimInfo.ClaimUID),
+				Name:      claimInfo.ClaimName,
+			}
+			for driverName := range claimInfo.DriverState {
+				batches[driverName] = append(batches[driverName], claim)
 			}
 
 			return nil
@@ -246,16 +244,16 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 	// Call NodePrepareResources for all claims in each batch.
 	// If there is any error, processing gets aborted.
 	// We could try to continue, but that would make the code more complex.
-	for pluginName, claims := range batches {
+	for driverName, claims := range batches {
 		// Call NodePrepareResources RPC for all resource handles.
-		client, err := dra.NewDRAPluginClient(pluginName)
+		client, err := dra.NewDRAPluginClient(driverName)
 		if err != nil {
-			return fmt.Errorf("failed to get DRA Plugin client for plugin name %s: %v", pluginName, err)
+			return fmt.Errorf("failed to get gRPC client for driver %s: %w", driverName, err)
 		}
-		response, err := client.NodePrepareResources(context.Background(), &drapb.NodePrepareResourcesRequest{Claims: claims})
+		response, err := client.NodePrepareResources(ctx, &drapb.NodePrepareResourcesRequest{Claims: claims})
 		if err != nil {
 			// General error unrelated to any particular claim.
-			return fmt.Errorf("NodePrepareResources failed: %v", err)
+			return fmt.Errorf("NodePrepareResources failed: %w", err)
 		}
 		for claimUID, result := range response.Claims {
 			reqClaim := lookupClaimRequest(claims, claimUID)
@@ -274,8 +272,8 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 				if !exists {
 					return fmt.Errorf("unable to get claim info for claim %s in namespace %s", claim.Name, claim.Namespace)
 				}
-				if err := info.setCDIDevices(pluginName, result.GetCDIDevices()); err != nil {
-					return fmt.Errorf("unable to add CDI devices for plugin %s of claim %s in namespace %s", pluginName, claim.Name, claim.Namespace)
+				for _, device := range result.GetDevices() {
+					info.addDevice(driverName, state.Device{PoolName: device.PoolName, DeviceName: device.DeviceName, RequestNames: device.RequestNames, CDIDeviceIDs: device.CDIDeviceIDs})
 				}
 				return nil
 			})
@@ -318,51 +316,23 @@ func (m *ManagerImpl) PrepareResources(pod *v1.Pod) error {
 
 func lookupClaimRequest(claims []*drapb.Claim, claimUID string) *drapb.Claim {
 	for _, claim := range claims {
-		if claim.Uid == claimUID {
+		if claim.UID == claimUID {
 			return claim
 		}
 	}
 	return nil
 }
 
-func claimIsUsedByPod(podClaim *v1.PodResourceClaim, pod *v1.Pod) bool {
-	if claimIsUsedByContainers(podClaim, pod.Spec.InitContainers) {
-		return true
-	}
-	if claimIsUsedByContainers(podClaim, pod.Spec.Containers) {
-		return true
-	}
-	return false
-}
-
-func claimIsUsedByContainers(podClaim *v1.PodResourceClaim, containers []v1.Container) bool {
-	for i := range containers {
-		if claimIsUsedByContainer(podClaim, &containers[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func claimIsUsedByContainer(podClaim *v1.PodResourceClaim, container *v1.Container) bool {
-	for _, c := range container.Resources.Claims {
-		if c.Name == podClaim.Name {
-			return true
-		}
-	}
-	return false
-}
-
 // GetResources gets a ContainerInfo object from the claimInfo cache.
 // This information is used by the caller to update a container config.
 func (m *ManagerImpl) GetResources(pod *v1.Pod, container *v1.Container) (*ContainerInfo, error) {
-	annotations := []kubecontainer.Annotation{}
 	cdiDevices := []kubecontainer.CDIDevice{}
 
-	for i, podResourceClaim := range pod.Spec.ResourceClaims {
-		claimName, _, err := resourceclaim.Name(pod, &pod.Spec.ResourceClaims[i])
+	for i := range pod.Spec.ResourceClaims {
+		podClaim := &pod.Spec.ResourceClaims[i]
+		claimName, _, err := resourceclaim.Name(pod, podClaim)
 		if err != nil {
-			return nil, fmt.Errorf("list resource claims: %v", err)
+			return nil, fmt.Errorf("list resource claims: %w", err)
 		}
 		// The claim name might be nil if no underlying resource claim
 		// was generated for the referenced claim. There are valid use
@@ -371,7 +341,7 @@ func (m *ManagerImpl) GetResources(pod *v1.Pod, container *v1.Container) (*Conta
 			continue
 		}
 		for _, claim := range container.Resources.Claims {
-			if podResourceClaim.Name != claim.Name {
+			if podClaim.Name != claim.Name {
 				continue
 			}
 
@@ -381,13 +351,8 @@ func (m *ManagerImpl) GetResources(pod *v1.Pod, container *v1.Container) (*Conta
 					return fmt.Errorf("unable to get claim info for claim %s in namespace %s", *claimName, pod.Namespace)
 				}
 
-				claimAnnotations := claimInfo.annotationsAsList()
-				klog.V(3).InfoS("Add resource annotations", "claim", *claimName, "annotations", claimAnnotations)
-				annotations = append(annotations, claimAnnotations...)
-
-				devices := claimInfo.cdiDevicesAsList()
-				klog.V(3).InfoS("Add CDI devices", "claim", *claimName, "CDI devices", devices)
-				cdiDevices = append(cdiDevices, devices...)
+				// As of Kubernetes 1.31, CDI device IDs are not passed via annotations anymore.
+				cdiDevices = append(cdiDevices, claimInfo.cdiDevicesAsList(claim.Request)...)
 
 				return nil
 			})
@@ -396,20 +361,19 @@ func (m *ManagerImpl) GetResources(pod *v1.Pod, container *v1.Container) (*Conta
 			}
 		}
 	}
-
-	return &ContainerInfo{Annotations: annotations, CDIDevices: cdiDevices}, nil
+	return &ContainerInfo{CDIDevices: cdiDevices}, nil
 }
 
-// UnprepareResources calls a plugin's NodeUnprepareResource API for each resource claim owned by a pod.
+// UnprepareResources calls a driver's NodeUnprepareResource API for each resource claim owned by a pod.
 // This function is idempotent and may be called multiple times against the same pod.
 // As such, calls to the underlying NodeUnprepareResource API are skipped for claims that have
 // already been successfully unprepared.
-func (m *ManagerImpl) UnprepareResources(pod *v1.Pod) error {
+func (m *ManagerImpl) UnprepareResources(ctx context.Context, pod *v1.Pod) error {
 	var claimNames []string
 	for i := range pod.Spec.ResourceClaims {
 		claimName, _, err := resourceclaim.Name(pod, &pod.Spec.ResourceClaims[i])
 		if err != nil {
-			return fmt.Errorf("unprepare resource claim: %v", err)
+			return fmt.Errorf("unprepare resource claim: %w", err)
 		}
 		// The claim name might be nil if no underlying resource claim
 		// was generated for the referenced claim. There are valid use
@@ -419,10 +383,11 @@ func (m *ManagerImpl) UnprepareResources(pod *v1.Pod) error {
 		}
 		claimNames = append(claimNames, *claimName)
 	}
-	return m.unprepareResources(pod.UID, pod.Namespace, claimNames)
+	return m.unprepareResources(ctx, pod.UID, pod.Namespace, claimNames)
 }
 
-func (m *ManagerImpl) unprepareResources(podUID types.UID, namespace string, claimNames []string) error {
+func (m *ManagerImpl) unprepareResources(ctx context.Context, podUID types.UID, namespace string, claimNames []string) error {
+	logger := klog.FromContext(ctx)
 	batches := make(map[string][]*drapb.Claim)
 	claimNamesMap := make(map[types.UID]string)
 	for _, claimName := range claimNames {
@@ -452,19 +417,14 @@ func (m *ManagerImpl) unprepareResources(podUID types.UID, namespace string, cla
 			// after NodeUnprepareResources GRPC succeeds
 			claimNamesMap[claimInfo.ClaimUID] = claimInfo.ClaimName
 
-			// Loop through all plugins and prepare for calling NodeUnprepareResources.
-			for _, resourceHandle := range claimInfo.ResourceHandles {
-				claim := &drapb.Claim{
-					Namespace:      claimInfo.Namespace,
-					Uid:            string(claimInfo.ClaimUID),
-					Name:           claimInfo.ClaimName,
-					ResourceHandle: resourceHandle.Data,
-				}
-				if resourceHandle.StructuredData != nil {
-					claim.StructuredResourceHandle = []*resourceapi.StructuredResourceHandle{resourceHandle.StructuredData}
-				}
-				pluginName := resourceHandle.DriverName
-				batches[pluginName] = append(batches[pluginName], claim)
+			// Loop through all drivers and prepare for calling NodeUnprepareResources.
+			claim := &drapb.Claim{
+				Namespace: claimInfo.Namespace,
+				UID:       string(claimInfo.ClaimUID),
+				Name:      claimInfo.ClaimName,
+			}
+			for driverName := range claimInfo.DriverState {
+				batches[driverName] = append(batches[driverName], claim)
 			}
 
 			return nil
@@ -477,16 +437,16 @@ func (m *ManagerImpl) unprepareResources(podUID types.UID, namespace string, cla
 	// Call NodeUnprepareResources for all claims in each batch.
 	// If there is any error, processing gets aborted.
 	// We could try to continue, but that would make the code more complex.
-	for pluginName, claims := range batches {
+	for driverName, claims := range batches {
 		// Call NodeUnprepareResources RPC for all resource handles.
-		client, err := dra.NewDRAPluginClient(pluginName)
+		client, err := dra.NewDRAPluginClient(driverName)
 		if err != nil {
-			return fmt.Errorf("failed to get DRA Plugin client for plugin name %s: %v", pluginName, err)
+			return fmt.Errorf("get gRPC client for DRA driver %s: %w", driverName, err)
 		}
-		response, err := client.NodeUnprepareResources(context.Background(), &drapb.NodeUnprepareResourcesRequest{Claims: claims})
+		response, err := client.NodeUnprepareResources(ctx, &drapb.NodeUnprepareResourcesRequest{Claims: claims})
 		if err != nil {
 			// General error unrelated to any particular claim.
-			return fmt.Errorf("NodeUnprepareResources failed: %v", err)
+			return fmt.Errorf("NodeUnprepareResources failed: %w", err)
 		}
 
 		for claimUID, result := range response.Claims {
@@ -509,7 +469,9 @@ func (m *ManagerImpl) unprepareResources(podUID types.UID, namespace string, cla
 	err := m.cache.withLock(func() error {
 		// Delete all claimInfos from the cache that have just been unprepared.
 		for _, claimName := range claimNamesMap {
+			claimInfo, _ := m.cache.get(claimName, namespace)
 			m.cache.delete(claimName, namespace)
+			logger.V(6).Info("Deleted claim info cache entry", "claim", klog.KRef(namespace, claimName), "claimInfoEntry", claimInfo)
 		}
 
 		// Atomically sync the cache back to the checkpoint.
@@ -540,7 +502,7 @@ func (m *ManagerImpl) GetContainerClaimInfos(pod *v1.Pod, container *v1.Containe
 	for i, podResourceClaim := range pod.Spec.ResourceClaims {
 		claimName, _, err := resourceclaim.Name(pod, &pod.Spec.ResourceClaims[i])
 		if err != nil {
-			return nil, fmt.Errorf("determine resource claim information: %v", err)
+			return nil, fmt.Errorf("determine resource claim information: %w", err)
 		}
 
 		for _, claim := range container.Resources.Claims {

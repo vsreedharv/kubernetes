@@ -37,6 +37,8 @@ import (
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	jsonpatch "gopkg.in/evanphx/json-patch.v4"
@@ -48,6 +50,7 @@ import (
 	otelsdkresource "go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	noopoteltrace "go.opentelemetry.io/otel/trace/noop"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -120,6 +123,9 @@ import (
 
 func init() {
 	utilruntime.Must(logsapi.AddFeatureGates(utilfeature.DefaultMutableFeatureGate))
+	// Prevent memory leak from OTel metrics, which we don't use:
+	// https://github.com/open-telemetry/opentelemetry-go-contrib/issues/5190
+	otel.SetMeterProvider(noop.NewMeterProvider())
 }
 
 const (
@@ -203,7 +209,7 @@ is checked every 20 seconds (also configurable with a flag).`,
 
 			if cleanFlagSet.Changed("pod-infra-container-image") {
 				klog.InfoS("--pod-infra-container-image will not be pruned by the image garbage collector in kubelet and should also be set in the remote runtime")
-				_ = cmd.Flags().MarkDeprecated("pod-infra-container-image", "--pod-infra-container-image will be removed in 1.30. Image garbage collector will get sandbox image information from CRI.")
+				_ = cmd.Flags().MarkDeprecated("pod-infra-container-image", "--pod-infra-container-image will be removed in 1.35. Image garbage collector will get sandbox image information from CRI.")
 			}
 
 			// load kubelet config file, if provided
@@ -449,7 +455,8 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 	if err != nil {
 		return nil, err
 	}
-	tp := oteltrace.NewNoopTracerProvider()
+	var tp oteltrace.TracerProvider
+	tp = noopoteltrace.NewTracerProvider()
 	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletTracing) {
 		tp, err = newTracerProvider(s)
 		if err != nil {
@@ -1358,7 +1365,7 @@ func parseResourceList(m map[string]string) (v1.ResourceList, error) {
 
 func newTracerProvider(s *options.KubeletServer) (oteltrace.TracerProvider, error) {
 	if s.KubeletConfiguration.Tracing == nil {
-		return oteltrace.NewNoopTracerProvider(), nil
+		return noopoteltrace.NewTracerProvider(), nil
 	}
 	hostname, err := nodeutil.GetHostname(s.HostnameOverride)
 	if err != nil {

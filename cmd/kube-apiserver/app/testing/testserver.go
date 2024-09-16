@@ -43,16 +43,19 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	serveroptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
 	"k8s.io/apiserver/pkg/storageversion"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	utilversion "k8s.io/apiserver/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	clientgotransport "k8s.io/client-go/transport"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/keyutil"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	logsapi "k8s.io/component-base/logs/api/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/kube-aggregator/pkg/apiserver"
@@ -98,6 +101,11 @@ type TestServerInstanceOptions struct {
 	// We specify this as on option to pass a common proxyCA to multiple apiservers to simulate
 	// an apiserver version skew scenario where all apiservers use the same proxyCA to verify client connections.
 	ProxyCA *ProxyCA
+	// Set the BinaryVersion of server effective version.
+	// Default to 1.31
+	BinaryVersion string
+	// Set non-default request timeout in the server.
+	RequestTimeout time.Duration
 }
 
 // TestServer return values supplied by kube-test-ApiServer
@@ -142,7 +150,11 @@ func NewDefaultTestServerOptions() *TestServerInstanceOptions {
 // files that because Golang testing's call to os.Exit will not give a stop channel go routine
 // enough time to remove temporary files.
 func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, customFlags []string, storageConfig *storagebackend.Config) (result TestServer, err error) {
-	tCtx := ktesting.Init(t)
+	// Some callers may have initialize ktesting already.
+	tCtx, ok := t.(ktesting.TContext)
+	if !ok {
+		tCtx = ktesting.Init(t)
+	}
 
 	if instanceOptions == nil {
 		instanceOptions = NewDefaultTestServerOptions()
@@ -177,7 +189,21 @@ func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, 
 
 	fs := pflag.NewFlagSet("test", pflag.PanicOnError)
 
+	featureGate := utilfeature.DefaultMutableFeatureGate
+	effectiveVersion := utilversion.DefaultKubeEffectiveVersion()
+	if instanceOptions.BinaryVersion != "" {
+		effectiveVersion = utilversion.NewEffectiveVersion(instanceOptions.BinaryVersion)
+	}
+	// need to call SetFeatureGateEmulationVersionDuringTest to reset the feature gate emulation version at the end of the test.
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, featureGate, effectiveVersion.EmulationVersion())
+	utilversion.DefaultComponentGlobalsRegistry.Reset()
+	utilruntime.Must(utilversion.DefaultComponentGlobalsRegistry.Register(utilversion.DefaultKubeComponent, effectiveVersion, featureGate))
+
 	s := options.NewServerRunOptions()
+	if instanceOptions.RequestTimeout > 0 {
+		s.GenericServerRunOptions.RequestTimeout = instanceOptions.RequestTimeout
+	}
+
 	for _, f := range s.Flags().FlagSets {
 		fs.AddFlagSet(f)
 	}
@@ -188,6 +214,7 @@ func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, 
 	}
 	s.SecureServing.ServerCert.CertDirectory = result.TmpDir
 
+	reqHeaderFromFlags := s.Authentication.RequestHeader
 	if instanceOptions.EnableCertAuth {
 		// set up default headers for request header auth
 		reqHeaders := serveroptions.NewDelegatingAuthenticationOptions()
@@ -318,6 +345,27 @@ func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, 
 	s.APIEnablement.RuntimeConfig.Set("api/all=true")
 
 	if err := fs.Parse(customFlags); err != nil {
+		return result, err
+	}
+
+	// the RequestHeader options pointer gets replaced in the case of EnableCertAuth override
+	// and so flags are connected to a struct that no longer appears in the ServerOptions struct
+	// we're using.
+	// We still want to make it possible to configure the headers config for the RequestHeader authenticator.
+	if usernameHeaders := reqHeaderFromFlags.UsernameHeaders; len(usernameHeaders) > 0 {
+		s.Authentication.RequestHeader.UsernameHeaders = usernameHeaders
+	}
+	if uidHeaders := reqHeaderFromFlags.UIDHeaders; len(uidHeaders) > 0 {
+		s.Authentication.RequestHeader.UIDHeaders = uidHeaders
+	}
+	if groupHeaders := reqHeaderFromFlags.GroupHeaders; len(groupHeaders) > 0 {
+		s.Authentication.RequestHeader.GroupHeaders = groupHeaders
+	}
+	if extraHeaders := reqHeaderFromFlags.ExtraHeaderPrefixes; len(extraHeaders) > 0 {
+		s.Authentication.RequestHeader.ExtraHeaderPrefixes = extraHeaders
+	}
+
+	if err := utilversion.DefaultComponentGlobalsRegistry.Set(); err != nil {
 		return result, err
 	}
 

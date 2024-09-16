@@ -22,17 +22,18 @@ package app
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"math/rand"
 	"net/http"
 	"os"
 	"sort"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/spf13/cobra"
-
+	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -40,6 +41,7 @@ import (
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/mux"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	utilversion "k8s.io/apiserver/pkg/util/version"
 	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/informers"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -77,6 +79,7 @@ import (
 	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
 	garbagecollector "k8s.io/kubernetes/pkg/controller/garbagecollector"
 	serviceaccountcontroller "k8s.io/kubernetes/pkg/controller/serviceaccount"
+	kubefeatures "k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/serviceaccount"
 )
 
@@ -104,6 +107,9 @@ const (
 
 // NewControllerManagerCommand creates a *cobra.Command object with default parameters
 func NewControllerManagerCommand() *cobra.Command {
+	_, _ = utilversion.DefaultComponentGlobalsRegistry.ComponentGlobalsOrRegister(
+		utilversion.DefaultKubeComponent, utilversion.DefaultBuildEffectiveVersion(), utilfeature.DefaultMutableFeatureGate)
+
 	s, err := options.NewKubeControllerManagerOptions()
 	if err != nil {
 		klog.Background().Error(err, "Unable to initialize command options")
@@ -125,7 +131,8 @@ controller, and serviceaccounts controller.`,
 			// kube-controller-manager generically watches APIs (including deprecated ones),
 			// and CI ensures it works properly against matching kube-apiserver versions.
 			restclient.SetDefaultWarningHandler(restclient.NoWarnings{})
-			return nil
+			// makes sure feature gates are set before RunE.
+			return s.ComponentGlobalsRegistry.Set()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			verflag.PrintAndExitIfRequested()
@@ -141,8 +148,10 @@ controller, and serviceaccounts controller.`,
 			if err != nil {
 				return err
 			}
+
 			// add feature enablement metrics
-			utilfeature.DefaultMutableFeatureGate.AddMetrics()
+			fg := s.ComponentGlobalsRegistry.FeatureGateFor(utilversion.DefaultKubeComponent)
+			fg.(featuregate.MutableFeatureGate).AddMetrics()
 			return Run(context.Background(), c.Complete())
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -223,7 +232,7 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
 		}
 	}
 
-	clientBuilder, rootClientBuilder := createClientBuilders(logger, c)
+	clientBuilder, rootClientBuilder := createClientBuilders(c)
 
 	saTokenControllerDescriptor := newServiceAccountTokenControllerDescriptor(rootClientBuilder)
 
@@ -281,6 +290,34 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
 			defer close(leaderMigrator.MigrationReady)
 			return startSATokenControllerInit(ctx, controllerContext, controllerName)
 		}
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.CoordinatedLeaderElection) {
+		binaryVersion, err := semver.ParseTolerant(utilversion.DefaultComponentGlobalsRegistry.EffectiveVersionFor(utilversion.DefaultKubeComponent).BinaryVersion().String())
+		if err != nil {
+			return err
+		}
+		emulationVersion, err := semver.ParseTolerant(utilversion.DefaultComponentGlobalsRegistry.EffectiveVersionFor(utilversion.DefaultKubeComponent).EmulationVersion().String())
+		if err != nil {
+			return err
+		}
+
+		// Start lease candidate controller for coordinated leader election
+		leaseCandidate, waitForSync, err := leaderelection.NewCandidate(
+			c.Client,
+			"kube-system",
+			id,
+			"kube-controller-manager",
+			binaryVersion.FinalizeVersion(),
+			emulationVersion.FinalizeVersion(),
+			[]coordinationv1.CoordinatedLeaseStrategy{coordinationv1.OldestEmulationVersion},
+		)
+		if err != nil {
+			return err
+		}
+		healthzHandler.AddHealthChecker(healthz.NewInformerSyncHealthz(waitForSync))
+
+		go leaseCandidate.Run(ctx)
 	}
 
 	// Start the main lock
@@ -832,16 +869,12 @@ func readCA(file string) ([]byte, error) {
 }
 
 // createClientBuilders creates clientBuilder and rootClientBuilder from the given configuration
-func createClientBuilders(logger klog.Logger, c *config.CompletedConfig) (clientBuilder clientbuilder.ControllerClientBuilder, rootClientBuilder clientbuilder.ControllerClientBuilder) {
+func createClientBuilders(c *config.CompletedConfig) (clientBuilder clientbuilder.ControllerClientBuilder, rootClientBuilder clientbuilder.ControllerClientBuilder) {
+
 	rootClientBuilder = clientbuilder.SimpleControllerClientBuilder{
 		ClientConfig: c.Kubeconfig,
 	}
 	if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
-		if len(c.ComponentConfig.SAController.ServiceAccountKeyFile) == 0 {
-			// It's possible another controller process is creating the tokens for us.
-			// If one isn't, we'll timeout and exit when our client builder is unable to create the tokens.
-			logger.Info("Warning: --use-service-account-credentials was specified without providing a --service-account-private-key-file")
-		}
 
 		clientBuilder = clientbuilder.NewDynamicClientBuilder(
 			restclient.AnonymousClientConfig(c.Kubeconfig),
@@ -879,6 +912,7 @@ func leaderElectAndRun(ctx context.Context, c *config.CompletedConfig, lockIdent
 		Callbacks:     callbacks,
 		WatchDog:      electionChecker,
 		Name:          leaseName,
+		Coordinated:   utilfeature.DefaultFeatureGate.Enabled(kubefeatures.CoordinatedLeaderElection),
 	})
 
 	panic("unreachable")

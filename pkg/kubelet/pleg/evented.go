@@ -17,6 +17,7 @@ limitations under the License.
 package pleg
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -192,7 +193,7 @@ func (e *EventedPLEG) watchEventsChannel() {
 				}
 			}
 
-			err := e.runtimeService.GetContainerEvents(containerEventsResponseCh, func(runtimeapi.RuntimeService_GetContainerEventsClient) {
+			err := e.runtimeService.GetContainerEvents(context.Background(), containerEventsResponseCh, func(runtimeapi.RuntimeService_GetContainerEventsClient) {
 				metrics.EventedPLEGConn.Inc()
 			})
 			if err != nil {
@@ -266,7 +267,7 @@ func (e *EventedPLEG) processCRIEvents(containerEventsResponseCh chan *runtimeap
 			}
 			shouldSendPLEGEvent = true
 		} else {
-			if e.cache.Set(podID, status, err, time.Unix(event.GetCreatedAt(), 0)) {
+			if e.cache.Set(podID, status, err, time.Unix(0, event.GetCreatedAt())) {
 				shouldSendPLEGEvent = true
 			}
 		}
