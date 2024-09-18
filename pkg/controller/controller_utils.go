@@ -713,14 +713,8 @@ func (s ByLogging) Less(i, j int) bool {
 		}
 	}
 	// 5. Pods with containers with higher restart counts < lower restart counts
-	regularRestartsI, sidecarRestartsI := maxContainerRestarts(s[i])
-	regularRestartsJ, sidecarRestartsJ := maxContainerRestarts(s[j])
-	if regularRestartsI != regularRestartsJ {
-		return regularRestartsI > regularRestartsJ
-	}
-	// If pods have the same restart count, an attempt is made to compare the restart counts of sidecar containers.
-	if sidecarRestartsI != sidecarRestartsJ {
-		return sidecarRestartsI > sidecarRestartsJ
+	if res := compareMaxContainerRestarts(s[i], s[j]); res != nil {
+		return *res
 	}
 	// 6. older pods < newer pods < empty timestamp pods
 	if !s[i].CreationTimestamp.Equal(&s[j].CreationTimestamp) {
@@ -762,14 +756,8 @@ func (s ActivePods) Less(i, j int) bool {
 		}
 	}
 	// 5. Pods with containers with higher restart counts < lower restart counts
-	regularRestartsI, sidecarRestartsI := maxContainerRestarts(s[i])
-	regularRestartsJ, sidecarRestartsJ := maxContainerRestarts(s[j])
-	if regularRestartsI != regularRestartsJ {
-		return regularRestartsI > regularRestartsJ
-	}
-	// If pods have the same restart count, an attempt is made to compare the restart counts of sidecar containers.
-	if sidecarRestartsI != sidecarRestartsJ {
-		return sidecarRestartsI > sidecarRestartsJ
+	if res := compareMaxContainerRestarts(s[i], s[j]); res != nil {
+		return *res
 	}
 	// 6. Empty creation time pods < newer pods < older pods
 	if !s[i].CreationTimestamp.Equal(&s[j].CreationTimestamp) {
@@ -970,6 +958,21 @@ func maxContainerRestarts(pod *v1.Pod) (regularRestarts, sidecarRestarts int) {
 		}
 	}
 	return
+}
+
+func compareMaxContainerRestarts(pi *v1.Pod, pj *v1.Pod) *bool {
+	regularRestartsI, sidecarRestartsI := maxContainerRestarts(pi)
+	regularRestartsJ, sidecarRestartsJ := maxContainerRestarts(pj)
+	if regularRestartsI != regularRestartsJ {
+		res := regularRestartsI > regularRestartsJ
+		return &res
+	}
+	// If pods have the same restart count, an attempt is made to compare the restart counts of sidecar containers.
+	if sidecarRestartsI != sidecarRestartsJ {
+		res := sidecarRestartsI > sidecarRestartsJ
+		return &res
+	}
+	return nil
 }
 
 // FilterActivePods returns pods that have not terminated.
