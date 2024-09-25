@@ -314,11 +314,7 @@ func TestSyncHandler(t *testing.T) {
 				return []*resourceapi.ResourceClaim{claim}
 			}(),
 			expectedClaims: func() []resourceapi.ResourceClaim {
-				claim := structuredParameters(testClaimAllocated.DeepCopy())
-				claim.DeletionTimestamp = &metav1.Time{}
-				claim.Finalizers = []string{}
-				claim.Status.Allocation = nil
-				return []resourceapi.ResourceClaim{*claim}
+				return nil // finalizer got removed
 			}(),
 			expectedMetrics: expectedMetrics{0, 0},
 		},
@@ -332,11 +328,7 @@ func TestSyncHandler(t *testing.T) {
 				return []*resourceapi.ResourceClaim{claim}
 			}(),
 			expectedClaims: func() []resourceapi.ResourceClaim {
-				claim := structuredParameters(testClaimAllocated.DeepCopy())
-				claim.DeletionTimestamp = &metav1.Time{}
-				claim.Finalizers = []string{}
-				claim.Status.Allocation = nil
-				return []resourceapi.ResourceClaim{*claim}
+				return nil // finalizer got removed
 			}(),
 			expectedMetrics: expectedMetrics{0, 0},
 		},
@@ -636,7 +628,9 @@ func normalizeScheduling(scheduling []resourceapi.PodSchedulingContext) []resour
 }
 
 func createTestClient(objects ...runtime.Object) *fake.Clientset {
-	fakeClient := fake.NewSimpleClientset(objects...)
+	fakeClient := fake.NewClientsetWithOptions(fake.ClientsetOptions{
+		SupportsFinalizer: true,
+	}, objects...)
 	fakeClient.PrependReactor("create", "resourceclaims", createResourceClaimReactor())
 	return fakeClient
 }
