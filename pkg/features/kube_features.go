@@ -661,6 +661,14 @@ const (
 	// Adds support to pull images based on the runtime class specified.
 	RuntimeClassInImageCriAPI featuregate.Feature = "RuntimeClassInImageCriApi"
 
+	// owner: @huww98
+	// kep: https://kep.k8s.io/4650
+	// alpha: v1.32
+	//
+	// Allow limited update to VolumeClaimTemplates of StatefulSet.
+	// Reconcile the updates with PVCs.
+	UpdateVolumeClaimTemplate featuregate.Feature = "UpdateVolumeClaimTemplate"
+
 	// owner: @danielvegamyhre
 	// kep: https://kep.k8s.io/2413
 	// beta: v1.27

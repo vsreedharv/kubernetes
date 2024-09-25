@@ -1781,6 +1781,9 @@ var schemaYAML = typed.YAMLObject(`types:
           elementType:
             namedType: io.k8s.api.core.v1.PersistentVolumeClaim
           elementRelationship: atomic
+    - name: volumeClaimUpdatePolicy
+      type:
+        scalar: string
 - name: io.k8s.api.apps.v1.StatefulSetStatus
   map:
     fields:
@@ -2090,6 +2093,9 @@ var schemaYAML = typed.YAMLObject(`types:
           elementType:
             namedType: io.k8s.api.core.v1.PersistentVolumeClaim
           elementRelationship: atomic
+    - name: volumeClaimUpdatePolicy
+      type:
+        scalar: string
 - name: io.k8s.api.apps.v1beta1.StatefulSetStatus
   map:
     fields:
@@ -2595,6 +2601,9 @@ var schemaYAML = typed.YAMLObject(`types:
           elementType:
             namedType: io.k8s.api.core.v1.PersistentVolumeClaim
           elementRelationship: atomic
+    - name: volumeClaimUpdatePolicy
+      type:
+        scalar: string
 - name: io.k8s.api.apps.v1beta2.StatefulSetStatus
   map:
     fields:

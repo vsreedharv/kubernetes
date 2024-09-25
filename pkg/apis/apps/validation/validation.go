@@ -29,9 +29,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // ValidateStatefulSetName can be used to check whether the given StatefulSet name is valid.
@@ -88,6 +90,18 @@ func ValidatePersistentVolumeClaimRetentionPolicy(policy *apps.StatefulSetPersis
 	return allErrs
 }
 
+func ValidateVolumeClaimUpdatePolicy(policy apps.StatefulSetVolumeClaimUpdatePolicyType, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	switch policy {
+	case "":
+	case apps.OnDeleteStatefulSetVolumeClaimUpdatePolicy:
+	case apps.InPlaceStatefulSetVolumeClaimUpdatePolicy:
+	default:
+		allErrs = append(allErrs, field.NotSupported(fldPath, policy, []string{string(apps.OnDeleteDaemonSetStrategyType), string(apps.InPlaceStatefulSetVolumeClaimUpdatePolicy)}))
+	}
+	return allErrs
+}
+
 // ValidateStatefulSetSpec tests if required fields in the StatefulSet spec are set.
 func ValidateStatefulSetSpec(spec *apps.StatefulSetSpec, fldPath *field.Path, opts apivalidation.PodValidationOptions) field.ErrorList {
 	allErrs := field.ErrorList{}
@@ -126,6 +140,7 @@ func ValidateStatefulSetSpec(spec *apps.StatefulSetSpec, fldPath *field.Path, op
 	}
 
 	allErrs = append(allErrs, ValidatePersistentVolumeClaimRetentionPolicy(spec.PersistentVolumeClaimRetentionPolicy, fldPath.Child("persistentVolumeClaimRetentionPolicy"))...)
+	allErrs = append(allErrs, ValidateVolumeClaimUpdatePolicy(spec.VolumeClaimUpdatePolicy, fldPath.Child("volumeClaimUpdatePolicy"))...)
 
 	allErrs = append(allErrs, apivalidation.ValidateNonnegativeField(int64(spec.Replicas), fldPath.Child("replicas"))...)
 	allErrs = append(allErrs, apivalidation.ValidateNonnegativeField(int64(spec.MinReadySeconds), fldPath.Child("minReadySeconds"))...)
@@ -179,18 +194,30 @@ func ValidateStatefulSetUpdate(statefulSet, oldStatefulSet *apps.StatefulSet, op
 	allErrs := apivalidation.ValidateObjectMetaUpdate(&statefulSet.ObjectMeta, &oldStatefulSet.ObjectMeta, field.NewPath("metadata"))
 	allErrs = append(allErrs, ValidateStatefulSetSpec(&statefulSet.Spec, field.NewPath("spec"), opts)...)
 
-	// statefulset updates aren't super common and general updates are likely to be touching spec, so we'll do this
-	// deep copy right away.  This avoids mutating our inputs
-	newStatefulSetClone := statefulSet.DeepCopy()
-	newStatefulSetClone.Spec.Replicas = oldStatefulSet.Spec.Replicas               // +k8s:verify-mutation:reason=clone
-	newStatefulSetClone.Spec.Template = oldStatefulSet.Spec.Template               // +k8s:verify-mutation:reason=clone
-	newStatefulSetClone.Spec.UpdateStrategy = oldStatefulSet.Spec.UpdateStrategy   // +k8s:verify-mutation:reason=clone
-	newStatefulSetClone.Spec.MinReadySeconds = oldStatefulSet.Spec.MinReadySeconds // +k8s:verify-mutation:reason=clone
-	newStatefulSetClone.Spec.Ordinals = oldStatefulSet.Spec.Ordinals               // +k8s:verify-mutation:reason=clone
+	validateSpecImmutable := func(f func(s *apps.StatefulSetSpec) any, fName string) {
+		allErrs = append(allErrs, apivalidation.ValidateImmutableField(f(&statefulSet.Spec), f(&oldStatefulSet.Spec), field.NewPath("spec", fName))...)
+	}
+	validateSpecImmutable(func(s *apps.StatefulSetSpec) any { return s.Selector }, "selector")
+	validateSpecImmutable(func(s *apps.StatefulSetSpec) any { return s.ServiceName }, "serviceName")
+	validateSpecImmutable(func(s *apps.StatefulSetSpec) any { return s.PodManagementPolicy }, "podManagementPolicy")
+	validateSpecImmutable(func(s *apps.StatefulSetSpec) any { return s.RevisionHistoryLimit }, "revisionHistoryLimit")
 
-	newStatefulSetClone.Spec.PersistentVolumeClaimRetentionPolicy = oldStatefulSet.Spec.PersistentVolumeClaimRetentionPolicy // +k8s:verify-mutation:reason=clone
-	if !apiequality.Semantic.DeepEqual(newStatefulSetClone.Spec, oldStatefulSet.Spec) {
-		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec"), "updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden"))
+	if utilfeature.DefaultFeatureGate.Enabled(features.UpdateVolumeClaimTemplate) {
+		if len(statefulSet.Spec.VolumeClaimTemplates) != len(oldStatefulSet.Spec.VolumeClaimTemplates) {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "volumeClaimTemplates"), statefulSet.Spec.VolumeClaimTemplates, "cannot change the number of volumes"))
+		} else {
+			for i := range statefulSet.Spec.VolumeClaimTemplates {
+				tOld := oldStatefulSet.Spec.VolumeClaimTemplates[i].DeepCopy()
+				t := &statefulSet.Spec.VolumeClaimTemplates[i]
+
+				tOld.Spec.Resources.Requests = t.Spec.Resources.Requests
+				if !apiequality.Semantic.DeepEqual(tOld, t) {
+					allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "volumeClaimTemplates").Index(i), t, "fields other than .spec.resources.requests are immutable"))
+				}
+			}
+		}
+	} else {
+		validateSpecImmutable(func(s *apps.StatefulSetSpec) any { return s.VolumeClaimTemplates }, "volumeClaimTemplates")
 	}
 
 	return allErrs
