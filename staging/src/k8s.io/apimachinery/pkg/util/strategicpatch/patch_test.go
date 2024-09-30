@@ -4353,6 +4353,8 @@ $setElementOrder/mergingList:
 mergingList:
 - name: 2
   value: dup2
+- $patch: delete
+  name: 2
 `),
 			TwoWayResult: []byte(`
 mergingList:
@@ -4369,6 +4371,8 @@ $setElementOrder/mergingList:
 mergingList:
 - name: 2
   value: dup2
+- $patch: delete
+  name: 2
 `),
 			Result: []byte(`
 mergingList:
