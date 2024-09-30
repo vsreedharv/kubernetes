@@ -798,6 +798,11 @@ func diffListsOfMaps(original, modified []interface{}, schema LookupPatchMeta, m
 					modifiedToAdd = append([]interface{}{element}, modifiedToAdd...)
 				}
 				deletionList = append(deletionList, CreateDeleteDirective(mergeKey, originalElementMergeKeyValue))
+				// remove existing occurencies added if previous elements pair has diffs
+				patch, err = removePatchElementsByMergeKeyValue(patch, mergeKey, originalElementMergeKeyValueString)
+				if err != nil {
+					return nil, nil, err
+				}
 				patch = append(patch, modifiedToAdd...)
 			}
 			originalIndex++
@@ -819,6 +824,21 @@ func diffListsOfMaps(original, modified []interface{}, schema LookupPatchMeta, m
 	}
 
 	return patch, deletionList, nil
+}
+
+// removePatchElementsByMergeKeyValue removes all elements from patch list with matching MergeKey value
+func removePatchElementsByMergeKeyValue(patch []interface{}, mergeKey, mergeKeyValue string) ([]interface{}, error) {
+	result := make([]interface{}, 0, len(patch))
+	for i, val := range patch {
+		_, key, err := getMapAndMergeKeyValueByIndex(i, mergeKey, patch)
+		if err != nil {
+			return nil, err
+		}
+		if fmt.Sprintf("%v", key) != mergeKeyValue {
+			result = append(result, val)
+		}
+	}
+	return result, nil
 }
 
 // getMapAndMergeKeyValueByIndex return a map in the list and its merge key value given the index of the map.
