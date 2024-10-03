@@ -3322,7 +3322,7 @@ func TestInitialStaticPodsRegistration(t *testing.T) {
 			defer testKubelet.Cleanup()
 			kubelet := testKubelet.kubelet
 			kubelet.podManager.SetPods(tc.pods)
-			kubelet.initialStaticPodsRegistered = tc.alreadyRegistered
+			kubelet.initialStaticPodsRegistered.Store(tc.alreadyRegistered)
 			err := kubelet.initialStaticPodsRegistration()
 			if tc.wantErr && err == nil {
 				t.Fatal("initialStaticPodsRegistration() did not return any error, want error")
