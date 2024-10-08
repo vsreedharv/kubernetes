@@ -142,7 +142,7 @@ func newDelayingQueue[T comparable](clock clock.WithTicker, q TypedInterface[T],
 		heartbeat:       clock.NewTicker(maxWait),
 		stopCh:          make(chan struct{}),
 		waitingForAddCh: make(chan *waitFor, 1000),
-		metrics:         newRetryMetrics(name, provider),
+		metrics:         newDelayQueueMetrics(name, provider),
 	}
 
 	go ret.waitingLoop()
@@ -167,8 +167,8 @@ type delayingType[T comparable] struct {
 	// waitingForAddCh is a buffered channel that feeds waitingForAdd
 	waitingForAddCh chan *waitFor
 
-	// metrics counts the number of retries
-	metrics retryMetrics
+	// metrics for the delay queue
+	metrics delayQueueMetrics
 }
 
 // waitFor holds the data to add and the time it should be added
@@ -293,6 +293,7 @@ func (q *delayingType[T]) waitingLoop() {
 			}
 
 			entry = heap.Pop(waitingForQueue).(*waitFor)
+			q.metrics.setWaitingForQueueSize(float64(waitingForQueue.Len()))
 			q.Add(entry.data.(T))
 			delete(waitingEntryByData, entry.data)
 		}
@@ -320,7 +321,7 @@ func (q *delayingType[T]) waitingLoop() {
 
 		case waitEntry := <-q.waitingForAddCh:
 			if waitEntry.readyAt.After(q.clock.Now()) {
-				insert(waitingForQueue, waitingEntryByData, waitEntry)
+				q.insert(waitingForQueue, waitingEntryByData, waitEntry)
 			} else {
 				q.Add(waitEntry.data.(T))
 			}
@@ -330,7 +331,7 @@ func (q *delayingType[T]) waitingLoop() {
 				select {
 				case waitEntry := <-q.waitingForAddCh:
 					if waitEntry.readyAt.After(q.clock.Now()) {
-						insert(waitingForQueue, waitingEntryByData, waitEntry)
+						q.insert(waitingForQueue, waitingEntryByData, waitEntry)
 					} else {
 						q.Add(waitEntry.data.(T))
 					}
@@ -342,19 +343,20 @@ func (q *delayingType[T]) waitingLoop() {
 	}
 }
 
-// insert adds the entry to the priority queue, or updates the readyAt if it already exists in the queue
-func insert(q *waitForPriorityQueue, knownEntries map[t]*waitFor, entry *waitFor) {
+// insert adds the entry to the priority queue, or updates the readyAt if it already exists in the queue.
+func (q *delayingType[T]) insert(pq *waitForPriorityQueue, knownEntries map[t]*waitFor, entry *waitFor) {
 	// if the entry already exists, update the time only if it would cause the item to be queued sooner
 	existing, exists := knownEntries[entry.data]
 	if exists {
 		if existing.readyAt.After(entry.readyAt) {
 			existing.readyAt = entry.readyAt
-			heap.Fix(q, existing.index)
+			heap.Fix(pq, existing.index)
 		}
 
 		return
 	}
 
-	heap.Push(q, entry)
+	heap.Push(pq, entry)
 	knownEntries[entry.data] = entry
+	q.metrics.setWaitingForQueueSize(float64(pq.Len()))
 }
