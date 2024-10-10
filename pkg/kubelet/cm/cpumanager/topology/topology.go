@@ -19,8 +19,8 @@ package topology
 import (
 	"fmt"
 
+	"github.com/go-logr/logr"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 )
 
@@ -246,7 +246,7 @@ func (d CPUDetails) CPUsInCores(ids ...int) cpuset.CPUSet {
 }
 
 // Discover returns CPUTopology based on cadvisor node info
-func Discover(machineInfo *cadvisorapi.MachineInfo) (*CPUTopology, error) {
+func Discover(logger logr.Logger, machineInfo *cadvisorapi.MachineInfo) (*CPUTopology, error) {
 	if machineInfo.NumCores == 0 {
 		return nil, fmt.Errorf("could not detect number of cpus")
 	}
@@ -266,7 +266,7 @@ func Discover(machineInfo *cadvisorapi.MachineInfo) (*CPUTopology, error) {
 					}
 				}
 			} else {
-				klog.ErrorS(nil, "Could not get unique coreID for socket", "socket", core.SocketID, "core", core.Id, "threads", core.Threads)
+				logger.Info("Could not get unique coreID for socket", "socket", core.SocketID, "core", core.Id, "threads", core.Threads)
 				return nil, err
 			}
 		}
