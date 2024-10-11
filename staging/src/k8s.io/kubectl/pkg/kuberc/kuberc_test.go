@@ -1467,6 +1467,42 @@ func TestApplyAlias(t *testing.T) {
 	}
 }
 
+func TestGetExplicitKuberc(t *testing.T) {
+	tests := []struct {
+		args     []string
+		expected string
+	}{
+		{
+			args:     []string{"kubectl", "get", "--kuberc", "/tmp/filepath"},
+			expected: "/tmp/filepath",
+		},
+		{
+			args:     []string{"kubectl", "get", "--kuberc=/tmp/filepath"},
+			expected: "/tmp/filepath",
+		},
+		{
+			args:     []string{"kubectl", "get", "--kuberc=/tmp/filepath", "--", "/bin/bash", "--kuberc", "anotherpath"},
+			expected: "/tmp/filepath",
+		},
+		{
+			args:     []string{"kubectl", "get", "--kuberc", "/tmp/filepath", "--", "/bin/bash", "--kuberc", "anotherpath"},
+			expected: "/tmp/filepath",
+		},
+		{
+			args:     []string{"kubectl", "get", "--", "/bin/bash", "--kuberc", "anotherpath"},
+			expected: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run("", func(t *testing.T) {
+			actual := getExplicitKuberc(test.args)
+			if test.expected != actual {
+				t.Fatalf("unexpected value %s expected %s", actual, test.expected)
+			}
+		})
+	}
+}
+
 // Add list of commands in nested way.
 // First iteration adds command into rootCmd,
 // Second iteration adds command into the previous one.

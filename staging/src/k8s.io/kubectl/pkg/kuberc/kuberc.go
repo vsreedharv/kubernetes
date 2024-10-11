@@ -313,6 +313,11 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 func getExplicitKuberc(args []string) string {
 	var kubercPath string
 	for i, arg := range args {
+		if arg == "--" {
+			// flags after "--" does not represent any flag of
+			// the command. We should short cut the iteration in here.
+			break
+		}
 		if arg == "--kuberc" {
 			if i+1 < len(args) {
 				kubercPath = args[i+1]
