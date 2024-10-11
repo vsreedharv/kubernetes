@@ -30,10 +30,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	"k8s.io/kubectl/pkg/config/v1alpha1"
-	"k8s.io/kubectl/pkg/scheme"
 )
 
 const RecommendedKubeRCFileName = "kuberc"
@@ -41,10 +42,15 @@ const RecommendedKubeRCFileName = "kuberc"
 var (
 	RecommendedConfigDir  = filepath.Join(homedir.HomeDir(), clientcmd.RecommendedHomeDir)
 	RecommendedKubeRCFile = filepath.Join(RecommendedConfigDir, RecommendedKubeRCFileName)
+
+	aliasNameRegex = regexp.MustCompile("^[a-zA-Z]+$")
+
+	scheme = runtime.NewScheme()
+	codecs = serializer.NewCodecFactory(scheme)
 )
 
 func init() {
-	kuberc.Install(scheme.Scheme)
+	kuberc.Install(scheme)
 }
 
 // PreferencesHandler is responsible for setting default flags
@@ -90,6 +96,11 @@ func (p *Preferences) Apply(rootCmd *cobra.Command, args []string, errOut io.Wri
 
 	if kuberc == nil {
 		return args, nil
+	}
+
+	err = validate(kuberc)
+	if err != nil {
+		return args, err
 	}
 
 	args, err = p.applyAliases(rootCmd, kuberc, args, errOut)
@@ -171,16 +182,6 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		// do not allow shadowing built-ins
 		if _, _, err := rootCmd.Find([]string{alias.Name}); err == nil {
 			fmt.Fprintf(errOut, "Warning: Setting alias %q to a built-in command is not supported\n", alias.Name)
-			continue
-		}
-
-		regex := regexp.MustCompile("^[a-zA-Z]+$")
-		if !regex.MatchString(alias.Name) {
-			return args, fmt.Errorf("invalid alias name, can only include alphabetical characters")
-		}
-
-		if _, ok := aliasArgsMap[alias.Name]; ok {
-			fmt.Fprintf(errOut, "alias %s is already set, skipping...\n", alias.Name)
 			continue
 		}
 
@@ -283,12 +284,26 @@ func DefaultGetPreferences(kuberc string) (*config.Preferences, error) {
 		}
 		return nil, err
 	}
-	pref := &config.Preferences{}
-	_, gvk, err := scheme.Codecs.UniversalDecoder(v1alpha1.SchemeGroupVersion).Decode(kubeRCBytes, nil, pref)
+
+	obj, gvk, err := codecs.UniversalDecoder().Decode(kubeRCBytes, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
 	}
-	return pref, nil
+
+	expectedGK := schema.GroupKind{
+		Group: config.SchemeGroupVersion.Group,
+		Kind:  "Preferences",
+	}
+	if gvk.GroupKind() != expectedGK {
+		return nil, fmt.Errorf("unsupported preference GVK %s", gvk.GroupKind().String())
+	}
+
+	var pref config.Preferences
+	if err := scheme.Convert(obj, &pref, nil); err != nil {
+		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
+	}
+
+	return &pref, nil
 }
 
 // Normally, we should extract this value directly from kuberc flag.
@@ -338,4 +353,19 @@ func searchInArgs(flagName string, shorthand string, args []string) bool {
 		}
 	}
 	return false
+}
+
+func validate(plugin *config.Preferences) error {
+	aliases := make(map[string]struct{})
+	for _, alias := range plugin.Aliases {
+		if !aliasNameRegex.MatchString(alias.Name) {
+			return fmt.Errorf("invalid alias name, can only include alphabetical characters")
+		}
+		if _, ok := aliases[alias.Name]; ok {
+			return fmt.Errorf("duplicate alias name %s", alias.Name)
+		}
+		aliases[alias.Name] = struct{}{}
+	}
+
+	return nil
 }
