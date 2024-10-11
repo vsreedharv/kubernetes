@@ -49,7 +49,7 @@ func TestApplyOverride(t *testing.T) {
 		name               string
 		nestedCmds         []fakeCmds
 		args               []string
-		getPreferencesFunc func(kuberc string) (*config.Preferences, error)
+		getPreferencesFunc func(kuberc string) (*config.Preference, error)
 		expectedFLags      []fakeFlag
 	}{
 		{
@@ -69,8 +69,8 @@ func TestApplyOverride(t *testing.T) {
 				"root",
 				"command1",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -117,8 +117,8 @@ func TestApplyOverride(t *testing.T) {
 				"command1",
 				"command2",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -171,8 +171,8 @@ func TestApplyOverride(t *testing.T) {
 				"--firstflag",
 				"explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -226,11 +226,11 @@ func TestApplyOverride(t *testing.T) {
 				"test-custom-kuberc-path",
 				"--firstflag=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
 				if kuberc != "test-custom-kuberc-path" {
 					return nil, fmt.Errorf("unexpected kuberc: %s", kuberc)
 				}
-				return &config.Preferences{
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -279,11 +279,11 @@ func TestApplyOverride(t *testing.T) {
 				"command2",
 				"--firstflag=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
 				if kuberc != "test-custom-kuberc-path" {
 					return nil, fmt.Errorf("unexpected kuberc: %s", kuberc)
 				}
-				return &config.Preferences{
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -332,11 +332,11 @@ func TestApplyOverride(t *testing.T) {
 				"--kuberc=test-custom-kuberc-path",
 				"--firstflag=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
 				if kuberc != "test-custom-kuberc-path" {
 					return nil, fmt.Errorf("unexpected kuberc: %s", kuberc)
 				}
-				return &config.Preferences{
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -385,11 +385,11 @@ func TestApplyOverride(t *testing.T) {
 				"--firstflag=explicit",
 				"--kuberc=test-custom-kuberc-path",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
 				if kuberc != "test-custom-kuberc-path" {
 					return nil, fmt.Errorf("unexpected kuberc: %s", kuberc)
 				}
-				return &config.Preferences{
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -437,8 +437,8 @@ func TestApplyOverride(t *testing.T) {
 				"command2",
 				"--firstflag=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -487,8 +487,8 @@ func TestApplyOverride(t *testing.T) {
 				"--firstflag",
 				"explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -538,8 +538,8 @@ func TestApplyOverride(t *testing.T) {
 				"-r",
 				"explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -588,8 +588,8 @@ func TestApplyOverride(t *testing.T) {
 				"command2",
 				"-r=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -643,8 +643,8 @@ func TestApplyOverride(t *testing.T) {
 				"explicit",
 				"--secondflag=changed",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -706,8 +706,8 @@ func TestApplyOverride(t *testing.T) {
 				"--firstflag",
 				"explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -783,7 +783,7 @@ func TestApplyAlias(t *testing.T) {
 		name               string
 		nestedCmds         []fakeCmds
 		args               []string
-		getPreferencesFunc func(kuberc string) (*config.Preferences, error)
+		getPreferencesFunc func(kuberc string) (*config.Preference, error)
 		expectedFLags      []fakeFlag
 		expectedCmd        string
 		expectedArgs       []string
@@ -806,8 +806,8 @@ func TestApplyAlias(t *testing.T) {
 				"root",
 				"getcmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -859,8 +859,8 @@ func TestApplyAlias(t *testing.T) {
 				"root",
 				"getcmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -916,8 +916,8 @@ func TestApplyAlias(t *testing.T) {
 				"root",
 				"getcmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -960,8 +960,8 @@ func TestApplyAlias(t *testing.T) {
 				"getcmd",
 				"--firstflag=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1015,8 +1015,8 @@ func TestApplyAlias(t *testing.T) {
 				"getcmd",
 				"-r=explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1071,8 +1071,8 @@ func TestApplyAlias(t *testing.T) {
 				"-r",
 				"explicit",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1130,8 +1130,8 @@ func TestApplyAlias(t *testing.T) {
 				"--firstflag=explicit",
 				"--secondflag=changed",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1187,8 +1187,8 @@ func TestApplyAlias(t *testing.T) {
 				"root",
 				"aliascmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1241,8 +1241,8 @@ func TestApplyAlias(t *testing.T) {
 				"--kuberc=kuberc",
 				"aliascmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1295,8 +1295,8 @@ func TestApplyAlias(t *testing.T) {
 				"aliascmd",
 				"--kuberc=kuberc",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",
@@ -1361,8 +1361,8 @@ func TestApplyAlias(t *testing.T) {
 				"root",
 				"aliascmd",
 			},
-			getPreferencesFunc: func(kuberc string) (*config.Preferences, error) {
-				return &config.Preferences{
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Preference",
 						APIVersion: "kubectl.config.k8s.io/v1alpha1",

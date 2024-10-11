@@ -30,7 +30,7 @@ run_kuberc_tests() {
 
   cat > "${TMPDIR:-/tmp}"/kuberc_file << EOF
 apiVersion: kubectl.config.k8s.io/v1alpha1
-kind: Preferences
+kind: Preference
 aliases:
 - name: crns
   command: create namespace

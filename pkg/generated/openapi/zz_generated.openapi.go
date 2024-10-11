@@ -1191,7 +1191,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"k8s.io/kubectl/pkg/config/v1alpha1.AliasOverride":                                                      schema_kubectl_pkg_config_v1alpha1_AliasOverride(ref),
 		"k8s.io/kubectl/pkg/config/v1alpha1.CommandOverride":                                                    schema_kubectl_pkg_config_v1alpha1_CommandOverride(ref),
 		"k8s.io/kubectl/pkg/config/v1alpha1.CommandOverrideFlag":                                                schema_kubectl_pkg_config_v1alpha1_CommandOverrideFlag(ref),
-		"k8s.io/kubectl/pkg/config/v1alpha1.Preferences":                                                        schema_kubectl_pkg_config_v1alpha1_Preferences(ref),
+		"k8s.io/kubectl/pkg/config/v1alpha1.Preference":                                                         schema_kubectl_pkg_config_v1alpha1_Preference(ref),
 		"k8s.io/kubelet/config/v1.CredentialProvider":                                                           schema_k8sio_kubelet_config_v1_CredentialProvider(ref),
 		"k8s.io/kubelet/config/v1.CredentialProviderConfig":                                                     schema_k8sio_kubelet_config_v1_CredentialProviderConfig(ref),
 		"k8s.io/kubelet/config/v1.ExecEnvVar":                                                                   schema_k8sio_kubelet_config_v1_ExecEnvVar(ref),
@@ -61186,11 +61186,11 @@ func schema_kubectl_pkg_config_v1alpha1_CommandOverrideFlag(ref common.Reference
 	}
 }
 
-func schema_kubectl_pkg_config_v1alpha1_Preferences(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_kubectl_pkg_config_v1alpha1_Preference(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "Preferences stores elements of KubeRC configuration file",
+				Description: "Preference stores elements of KubeRC configuration file",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {

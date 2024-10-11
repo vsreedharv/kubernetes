@@ -43,7 +43,7 @@ func init() {
 // addKnownTypes registers known types to the given scheme
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&Preferences{},
+		&Preference{},
 	)
 
 	return nil

@@ -63,7 +63,7 @@ type PreferencesHandler interface {
 // Preferences stores the kuberc file coming either from environment variable
 // or file from set in flag or the default kuberc path.
 type Preferences struct {
-	getPreferencesFunc func(kuberc string) (*config.Preferences, error)
+	getPreferencesFunc func(kuberc string) (*config.Preference, error)
 
 	aliases map[string]struct{}
 }
@@ -115,7 +115,7 @@ func (p *Preferences) Apply(rootCmd *cobra.Command, args []string, errOut io.Wri
 }
 
 // applyOverrides finds the command and sets the defaulted flag values in kuberc.
-func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Preferences, args []string, errOut io.Writer) error {
+func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Preference, args []string, errOut io.Writer) error {
 	args = args[1:]
 	cmd, _, err := rootCmd.Find(args)
 	if err != nil {
@@ -165,7 +165,7 @@ func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Pref
 // alias that is currently executed from args. After that it sets the flag definitions in alias as default values
 // of the command. Lastly, others parameters (e.g. resources, etc.) that are passed as arguments in kuberc
 // is appended into the command args.
-func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Preferences, args []string, errOut io.Writer) ([]string, error) {
+func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Preference, args []string, errOut io.Writer) ([]string, error) {
 	_, _, err := rootCmd.Find(args[1:])
 	if err == nil {
 		// Command is found, no need to continue for aliasing
@@ -264,7 +264,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 // priority. If not specified, it looks for in KUBERC environment variable.
 // If KUBERC is also not set, it falls back to default .kuberc file at the same location
 // where kubeconfig's defaults are residing in.
-func DefaultGetPreferences(kuberc string) (*config.Preferences, error) {
+func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 	kubeRCFile := RecommendedKubeRCFile
 	explicitly := false
 	if kuberc != "" {
@@ -292,13 +292,13 @@ func DefaultGetPreferences(kuberc string) (*config.Preferences, error) {
 
 	expectedGK := schema.GroupKind{
 		Group: config.SchemeGroupVersion.Group,
-		Kind:  "Preferences",
+		Kind:  "Preference",
 	}
 	if gvk.GroupKind() != expectedGK {
 		return nil, fmt.Errorf("unsupported preference GVK %s", gvk.GroupKind().String())
 	}
 
-	var pref config.Preferences
+	var pref config.Preference
 	if err := scheme.Convert(obj, &pref, nil); err != nil {
 		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
 	}
@@ -355,7 +355,7 @@ func searchInArgs(flagName string, shorthand string, args []string) bool {
 	return false
 }
 
-func validate(plugin *config.Preferences) error {
+func validate(plugin *config.Preference) error {
 	aliases := make(map[string]struct{})
 	for _, alias := range plugin.Aliases {
 		if !aliasNameRegex.MatchString(alias.Name) {

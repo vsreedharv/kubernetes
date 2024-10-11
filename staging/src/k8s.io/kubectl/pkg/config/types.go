@@ -20,8 +20,8 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// Preferences stores elements of KubeRC configuration file
-type Preferences struct {
+// Preference stores elements of KubeRC configuration file
+type Preference struct {
 	metav1.TypeMeta
 
 	// overrides allows changing default flag values of commands.
