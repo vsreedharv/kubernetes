@@ -61046,7 +61046,7 @@ func schema_kubectl_pkg_config_v1alpha1_AliasOverride(ref common.ReferenceCallba
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AliasOverride stores the alias definitions. It is applied in a pre-defined order which is kubectl [ALIAS NAME] expands to kubectl [COMMAND] [USER_FLAGS] [USER_EXPLICIT_ARGUMENTS] [USER_KUBERC_ARGUMENTS]",
+				Description: "AliasOverride stores the alias definitions.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -61214,7 +61214,7 @@ func schema_kubectl_pkg_config_v1alpha1_Preferences(ref common.ReferenceCallback
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Overrides is used to change the defaults values of flags of commands. This is especially useful, when user doesn't want to explicitly set flags each time.",
+							Description: "overrides allows changing default flag values of commands. This is especially useful, when user doesn't want to explicitly set flags each time.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -61233,7 +61233,7 @@ func schema_kubectl_pkg_config_v1alpha1_Preferences(ref common.ReferenceCallback
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Aliases stores the alias definitions. If the alias name collides with a built-in command, built-in command always overrides the alias name.",
+							Description: "aliases allows defining command aliases for existing kubectl commands, with optional default flag values. If the alias name collides with a built-in command, built-in command always takes precedence. kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to kubectl [COMMAND] # built-in command alias points to\n        [USER_FLAGS]\n        [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]\n        [USER_EXPLICIT_ARGS]\n        [KUBERC_ALIAS_ARGUMENTS]\ne.g. - name: runx\n  command: run\n  flags:\n  - name: image\n    default: nginx\n  args:\n  - --\n  - custom-arg1\nFor example, if user invokes \"kubectl runx test-pod\" command, this will be expanded to \"kubectl run --image=nginx test-pod -- custom-arg1\"",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

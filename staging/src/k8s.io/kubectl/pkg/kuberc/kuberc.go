@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"k8s.io/kubectl/pkg/config"
+	kuberc "k8s.io/kubectl/pkg/config/install"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -41,6 +42,10 @@ var (
 	RecommendedConfigDir  = filepath.Join(homedir.HomeDir(), clientcmd.RecommendedHomeDir)
 	RecommendedKubeRCFile = filepath.Join(RecommendedConfigDir, RecommendedKubeRCFileName)
 )
+
+func init() {
+	kuberc.Install(scheme.Scheme)
+}
 
 // PreferencesHandler is responsible for setting default flags
 // arguments based on user's kuberc configuration.

@@ -24,21 +24,36 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type Preferences struct {
 	metav1.TypeMeta
 
-	// Overrides is used to change the defaults values of flags of commands.
+	// overrides allows changing default flag values of commands.
 	// This is especially useful, when user doesn't want to explicitly
 	// set flags each time.
 	// +optional
 	Overrides []CommandOverride
 
-	// Aliases stores the alias definitions. If the alias name collides with
-	// a built-in command, built-in command always overrides the alias name.
+	// aliases allows defining command aliases for existing kubectl commands, with optional default flag values.
+	// If the alias name collides with a built-in command, built-in command always takes precedence.
+	// kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to
+	// kubectl [COMMAND] # built-in command alias points to
+	//         [USER_FLAGS]
+	//         [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]
+	//         [USER_EXPLICIT_ARGS]
+	//         [KUBERC_ALIAS_ARGUMENTS]
+	// e.g.
+	// - name: runx
+	//   command: run
+	//   flags:
+	//   - name: image
+	//     default: nginx
+	//   args:
+	//   - --
+	//   - custom-arg1
+	// For example, if user invokes "kubectl runx test-pod" command,
+	// this will be expanded to "kubectl run --image=nginx test-pod -- custom-arg1"
 	// +optional
 	Aliases []AliasOverride
 }
 
 // AliasOverride stores the alias definitions.
-// It is applied in a pre-defined order which is
-// kubectl [ALIAS NAME] expands to kubectl [COMMAND] [USER_FLAGS] [USER_EXPLICIT_ARGUMENTS] [USER_KUBERC_ARGUMENTS]
 type AliasOverride struct {
 	// Name is the name of alias that can only include alphabetical characters
 	// If the alias name conflicts with the built-in command,
