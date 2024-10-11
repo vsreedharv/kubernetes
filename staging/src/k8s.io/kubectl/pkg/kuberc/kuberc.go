@@ -172,70 +172,65 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		return args, nil
 	}
 
-	aliasArgsMap := make(map[string]struct {
+	aliasArgsMap := &struct {
 		args    []string
 		flags   []config.CommandOverrideFlag
 		command *cobra.Command
-	})
+	}{}
+
+	var commandName string // first "non-flag" arguments
+	for _, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			commandName = arg
+			break
+		}
+	}
 
 	for _, alias := range kuberc.Aliases {
+		p.aliases[alias.Name] = struct{}{}
+		if alias.Name != commandName {
+			continue
+		}
+
 		// do not allow shadowing built-ins
 		if _, _, err := rootCmd.Find([]string{alias.Name}); err == nil {
 			fmt.Fprintf(errOut, "Warning: Setting alias %q to a built-in command is not supported\n", alias.Name)
-			continue
+			break
 		}
 
 		commands := strings.Split(alias.Command, " ")
 		existingCmd, flags, err := rootCmd.Find(commands)
 		if err != nil {
-			fmt.Fprintf(errOut, "Warning: command %q not found to set alias %q: %v\n", alias.Command, alias.Name, flags)
-			continue
+			return args, fmt.Errorf("command %q not found to set alias %q: %v", alias.Command, alias.Name, flags)
 		}
 
 		newCmd := *existingCmd
 		newCmd.Use = alias.Name
 		aliasCmd := &newCmd
 
-		aliasArgsMap[alias.Name] = struct {
-			args    []string
-			flags   []config.CommandOverrideFlag
-			command *cobra.Command
-		}{
-			args:    alias.Args,
-			flags:   alias.Flags,
-			command: aliasCmd,
-		}
+		aliasArgsMap.args = alias.Args
+		aliasArgsMap.flags = alias.Flags
+		aliasArgsMap.command = aliasCmd
+		break
 	}
 
-	// It is verified that all the aliases are valid. So that, now we
-	// can define them in to the root command.
-	for key, val := range aliasArgsMap {
-		p.aliases[key] = struct{}{}
-		rootCmd.AddCommand(val.command)
-	}
-
-	var aliasName string // first "non-flag" arguments
-	for _, arg := range args[1:] {
-		if !strings.HasPrefix(arg, "-") {
-			aliasName = arg
-			break
-		}
-	}
-
-	foundAliasCmd, _, err := rootCmd.Find([]string{aliasName})
-	if err != nil {
+	if aliasArgsMap == nil {
+		// pursue with the current behavior.
+		// This might be a built-in command, external plugin, etc.
 		return args, nil
 	}
 
-	aliasArgs, ok := aliasArgsMap[aliasName]
-	if !ok {
+	rootCmd.AddCommand(aliasArgsMap.command)
+
+	foundAliasCmd, _, err := rootCmd.Find([]string{commandName})
+	if err != nil {
 		return args, nil
 	}
 
 	// This function triggers merging the persistent flags in the parent commands.
 	_ = foundAliasCmd.InheritedFlags()
 
-	for _, fl := range aliasArgs.flags {
+	for _, fl := range aliasArgsMap.flags {
 		existingFlag := foundAliasCmd.Flag(fl.Name)
 		if existingFlag == nil {
 			return args, fmt.Errorf("invalid alias flag %s in alias %s", fl.Name, args[0])
@@ -251,7 +246,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 	}
 
 	// all args defined in kuberc should be appended to actual args.
-	args = append(args, aliasArgs.args...)
+	args = append(args, aliasArgsMap.args...)
 	// Cobra (command.go#L1078) appends only root command's args into the actual args and ignores the others.
 	// We are appending the additional args defined in kuberc in here and
 	// expect that it will be passed along to the actual command.
