@@ -362,6 +362,59 @@ func TestApplyOverride(t *testing.T) {
 			},
 		},
 		{
+			name: "use explicit kuberc equal, subcommand explicit takes precedence multi spaces",
+			nestedCmds: []fakeCmds{
+				{
+					name:  "command1",
+					flags: nil,
+				},
+				{
+					name: "command2",
+					flags: []fakeFlag{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"command1",
+				"command2",
+				"--kuberc=test-custom-kuberc-path",
+				"--firstflag=explicit",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				if kuberc != "test-custom-kuberc-path" {
+					return nil, fmt.Errorf("unexpected kuberc: %s", kuberc)
+				}
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "  command1   command2   ",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag{
+				{
+					name:  "firstflag",
+					value: "explicit",
+				},
+			},
+		},
+		{
 			name: "use explicit kuberc equal at the end, subcommand explicit takes precedence",
 			nestedCmds: []fakeCmds{
 				{
@@ -943,6 +996,49 @@ func TestApplyAlias(t *testing.T) {
 			expectedErr: fmt.Errorf("invalid alias name, can only include alphabetical characters"),
 		},
 		{
+			name: "invalid aliasname with spaces",
+			nestedCmds: []fakeCmds{
+				{
+					name: "command1",
+					flags: []fakeFlag{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd subalias",
+							Command: "command1",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedErr: fmt.Errorf("invalid alias name, can only include alphabetical characters"),
+		},
+		{
 			name: "command override",
 			nestedCmds: []fakeCmds{
 				{
@@ -1371,6 +1467,72 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "command1 command2",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed2",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag{
+				{
+					name:  "firstflag",
+					value: "changed2",
+				},
+			},
+			expectedCmd: "aliascmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+		{
+			name: "subcommand aliasing with spaces",
+			nestedCmds: []fakeCmds{
+				{
+					name: "command1",
+					flags: []fakeFlag{
+						{
+							name:  "firstflag",
+							value: "shouldntuse",
+						},
+						{
+							name:  "secondflag",
+							value: "shouldntuse",
+						},
+					},
+				},
+				{
+					name: "command2",
+					flags: []fakeFlag{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"aliascmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "aliascmd",
+							Command: "   command1   command2  ",
 							Args: []string{
 								"resources",
 								"nodes",

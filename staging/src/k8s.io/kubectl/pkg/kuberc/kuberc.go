@@ -124,7 +124,7 @@ func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Pref
 	}
 
 	for _, c := range kuberc.Overrides {
-		parsedCmds := strings.Split(c.Command, " ")
+		parsedCmds := strings.Fields(c.Command)
 		overrideCmd, _, err := rootCmd.Find(parsedCmds)
 		if err != nil {
 			fmt.Fprintf(errOut, "Warning: command %q not found to set kuberc override\n", c.Command)
@@ -198,7 +198,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 			break
 		}
 
-		commands := strings.Split(alias.Command, " ")
+		commands := strings.Fields(alias.Command)
 		existingCmd, flags, err := rootCmd.Find(commands)
 		if err != nil {
 			return args, fmt.Errorf("command %q not found to set alias %q: %v", alias.Command, alias.Name, flags)
