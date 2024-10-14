@@ -23,9 +23,6 @@ import (
 
 	"k8s.io/kubectl/pkg/config"
 
-	"github.com/spf13/pflag"
-	"k8s.io/component-base/cli/flag"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/spf13/cobra"
@@ -33,31 +30,48 @@ import (
 	"k8s.io/kubectl/pkg/cmd/util"
 )
 
-type fakeCmds struct {
+type fakeCmds[T supportedTypes] struct {
 	name  string
-	flags []fakeFlag
+	flags []fakeFlag[T]
 }
 
-type fakeFlag struct {
+type supportedTypes interface {
+	string | bool
+}
+
+type fakeFlag[T supportedTypes] struct {
 	name      string
-	value     string
+	value     T
 	shorthand string
 }
 
+type testApplyOverride[T supportedTypes] struct {
+	name               string
+	nestedCmds         []fakeCmds[T]
+	args               []string
+	getPreferencesFunc func(kuberc string) (*config.Preference, error)
+	expectedFLags      []fakeFlag[T]
+}
+
+type testApplyAlias[T supportedTypes] struct {
+	name               string
+	nestedCmds         []fakeCmds[T]
+	args               []string
+	getPreferencesFunc func(kuberc string) (*config.Preference, error)
+	expectedFLags      []fakeFlag[T]
+	expectedCmd        string
+	expectedArgs       []string
+	expectedErr        error
+}
+
 func TestApplyOverride(t *testing.T) {
-	tests := []struct {
-		name               string
-		nestedCmds         []fakeCmds
-		args               []string
-		getPreferencesFunc func(kuberc string) (*config.Preference, error)
-		expectedFLags      []fakeFlag
-	}{
+	tests := []testApplyOverride[string]{
 		{
 			name: "command override",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -88,7 +102,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -97,14 +111,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand override",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -136,7 +150,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -145,14 +159,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand override with prefix incorrectly matches",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "first",
 							value: "test",
@@ -190,7 +204,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "first",
 					value: "changed",
@@ -203,14 +217,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "use explicit kuberc, subcommand explicit takes precedence",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -248,7 +262,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -257,14 +271,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "use explicit kuberc, subcommand explicit takes precedence kuberc flag first",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -301,7 +315,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -310,14 +324,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "use explicit kuberc equal, subcommand explicit takes precedence",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -354,7 +368,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -363,14 +377,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "use explicit kuberc equal, subcommand explicit takes precedence multi spaces",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -407,7 +421,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -416,14 +430,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "use explicit kuberc equal at the end, subcommand explicit takes precedence",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -460,7 +474,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -469,14 +483,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand explicit takes precedence",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -509,7 +523,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -518,14 +532,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand explicit takes precedence with space",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -559,7 +573,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -568,14 +582,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand explicit takes precedence with space and with shorthand",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:      "firstflag",
 							value:     "test",
@@ -610,7 +624,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -619,14 +633,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand explicit takes precedence with space and with shorthand and equal sign",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:      "firstflag",
 							value:     "test",
@@ -660,7 +674,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -669,14 +683,14 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "subcommand check the not overridden flag",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name:  "command1",
 					flags: nil,
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -715,7 +729,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -728,10 +742,10 @@ func TestApplyOverride(t *testing.T) {
 		},
 		{
 			name: "command1 also has same flag",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "shouldnuse",
@@ -744,7 +758,7 @@ func TestApplyOverride(t *testing.T) {
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -778,7 +792,7 @@ func TestApplyOverride(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -832,22 +846,13 @@ func TestApplyOverride(t *testing.T) {
 }
 
 func TestApplyAlias(t *testing.T) {
-	tests := []struct {
-		name               string
-		nestedCmds         []fakeCmds
-		args               []string
-		getPreferencesFunc func(kuberc string) (*config.Preference, error)
-		expectedFLags      []fakeFlag
-		expectedCmd        string
-		expectedArgs       []string
-		expectedErr        error
-	}{
+	tests := []testApplyAlias[string]{
 		{
 			name: "command override",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -883,7 +888,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -897,10 +902,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "invalid duplicate aliasname",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -954,10 +959,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "invalid aliasname",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -997,10 +1002,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "invalid aliasname with spaces",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1040,10 +1045,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "command override",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1080,7 +1085,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -1094,10 +1099,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "command override with shorthand",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:      "firstflag",
 							value:     "test",
@@ -1135,7 +1140,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -1149,10 +1154,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "command override with shorthand and space",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:      "firstflag",
 							value:     "test",
@@ -1191,7 +1196,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -1205,10 +1210,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "command override",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1250,7 +1255,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "explicit",
@@ -1268,10 +1273,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "simple aliasing",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1307,7 +1312,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -1321,10 +1326,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "simple aliasing with kuberc flag first",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1361,7 +1366,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -1375,10 +1380,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "simple aliasing with kuberc flag after",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1415,7 +1420,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed",
@@ -1429,10 +1434,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "subcommand aliasing",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "shouldntuse",
@@ -1445,7 +1450,7 @@ func TestApplyAlias(t *testing.T) {
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1481,7 +1486,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed2",
@@ -1495,10 +1500,10 @@ func TestApplyAlias(t *testing.T) {
 		},
 		{
 			name: "subcommand aliasing with spaces",
-			nestedCmds: []fakeCmds{
+			nestedCmds: []fakeCmds[string]{
 				{
 					name: "command1",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "shouldntuse",
@@ -1511,7 +1516,7 @@ func TestApplyAlias(t *testing.T) {
 				},
 				{
 					name: "command2",
-					flags: []fakeFlag{
+					flags: []fakeFlag[string]{
 						{
 							name:  "firstflag",
 							value: "test",
@@ -1547,7 +1552,7 @@ func TestApplyAlias(t *testing.T) {
 					},
 				}, nil
 			},
-			expectedFLags: []fakeFlag{
+			expectedFLags: []fakeFlag[string]{
 				{
 					name:  "firstflag",
 					value: "changed2",
@@ -1668,7 +1673,7 @@ func TestGetExplicitKuberc(t *testing.T) {
 // Add list of commands in nested way.
 // First iteration adds command into rootCmd,
 // Second iteration adds command into the previous one.
-func addCommands(rootCmd *cobra.Command, commands []fakeCmds) {
+func addCommands[T supportedTypes](rootCmd *cobra.Command, commands []fakeCmds[T]) {
 	if len(commands) == 0 {
 		return
 	}
@@ -1678,11 +1683,23 @@ func addCommands(rootCmd *cobra.Command, commands []fakeCmds) {
 	}
 
 	for _, flg := range commands[0].flags {
-		val := flag.StringFlag{}
-		val.Set(flg.value) // nolint: errcheck
-		subCmd.Flags().AddFlag(&pflag.Flag{Name: flg.name, Value: &val, Shorthand: flg.shorthand})
+		switch v := any(flg.value).(type) {
+		case string:
+			if flg.shorthand != "" {
+				subCmd.Flags().StringP(flg.name, flg.shorthand, v, "")
+			} else {
+				subCmd.Flags().String(flg.name, v, "")
+			}
+		case bool:
+			if flg.shorthand != "" {
+				subCmd.Flags().BoolP(flg.name, flg.shorthand, v, "")
+			} else {
+				subCmd.Flags().Bool(flg.name, v, "")
+			}
+		}
+
 	}
 	rootCmd.AddCommand(subCmd)
 
-	addCommands(subCmd, commands[1:])
+	addCommands[T](subCmd, commands[1:])
 }
