@@ -44,6 +44,7 @@ var (
 	RecommendedKubeRCFile = filepath.Join(RecommendedConfigDir, RecommendedKubeRCFileName)
 
 	aliasNameRegex = regexp.MustCompile("^[a-zA-Z]+$")
+	shortHandRegex = regexp.MustCompile("^-[a-zA-Z]([-a-zA-Z]*)$")
 
 	scheme = runtime.NewScheme()
 	codecs = serializer.NewCodecFactory(scheme)
@@ -146,7 +147,7 @@ func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Pref
 			if existingFlag == nil {
 				return fmt.Errorf("invalid flag %s for command %s", fl.Name, c.Command)
 			}
-			if searchInArgs(existingFlag.Name, existingFlag.Shorthand, args) {
+			if searchInArgs(existingFlag.Name, existingFlag.Shorthand, cmd.Flags(), args) {
 				// Don't modify the value implicitly, if it is passed in args explicitly
 				continue
 			}
@@ -185,6 +186,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 			break
 		}
 	}
+	commandName = strings.TrimSpace(commandName)
 
 	for _, alias := range kuberc.Aliases {
 		p.aliases[alias.Name] = struct{}{}
@@ -235,7 +237,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		if existingFlag == nil {
 			return args, fmt.Errorf("invalid alias flag %s in alias %s", fl.Name, args[0])
 		}
-		if searchInArgs(existingFlag.Name, existingFlag.Shorthand, args) {
+		if searchInArgs(existingFlag.Name, existingFlag.Shorthand, foundAliasCmd.Flags(), args) {
 			// Don't modify the value implicitly, if it is passed in args explicitly
 			continue
 		}
@@ -336,20 +338,51 @@ func getExplicitKuberc(args []string) string {
 
 // searchInArgs searches the given key in the args and returns
 // true, if it finds. Otherwise, it returns false.
-func searchInArgs(flagName string, shorthand string, args []string) bool {
+func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args []string) bool {
 	for _, arg := range args {
+		sanitizedArg := strings.TrimSpace(arg)
 		// if flag is set in args in "--flag value" or "--flag=value" format,
 		// we should return it as found
-		if fmt.Sprintf("--%s", flagName) == arg || strings.HasPrefix(arg, fmt.Sprintf("--%s=", flagName)) {
+		if fmt.Sprintf("--%s", flagName) == sanitizedArg || strings.HasPrefix(sanitizedArg, fmt.Sprintf("--%s=", flagName)) {
 			return true
 		}
-		if shorthand != "" {
-			// shorthand can only be in "-n value" format
-			// it is guaranteed that shorthand is one letter. So that
-			// checking just the prefix -oyaml also finds --output.
-			if strings.HasPrefix(arg, fmt.Sprintf("-%s", shorthand)) {
-				return true
+		if shorthand == "" {
+			continue
+		}
+		// shorthand can be in "-n value" or "-nvalue" format
+		// it is guaranteed that shorthand is one letter. So that
+		// checking just the prefix -oyaml also finds --output.
+		if strings.HasPrefix(sanitizedArg, fmt.Sprintf("-%s", shorthand)) {
+			return true
+		}
+
+		if !shortHandRegex.MatchString(sanitizedArg) {
+			continue
+		}
+
+		// remove prefix "-"
+		sanitizedArg = sanitizedArg[1:]
+		// short hands can be in a combined "-abc" format.
+		// First we need to ensure that all the values are shorthand to safely search ours.
+		// Because we know that "-abcvalue" is not valid. So that we need to be sure that if we find
+		// "b" it correctly refers to the shorthand "b" not arbitrary value "-cargb".
+		allShorthands := make(map[string]struct{})
+		flags.VisitAll(func(flag *pflag.Flag) {
+			allShorthands[flag.Shorthand] = struct{}{}
+		})
+		arbitraryFound := false
+		for _, runeValue := range shorthand {
+			if _, ok := allShorthands[string(runeValue)]; !ok {
+				arbitraryFound = true
+				break
 			}
+		}
+		if arbitraryFound {
+			continue
+		}
+		// verified that all values are short hand. Now search ours
+		if strings.Contains(sanitizedArg, shorthand) {
+			return true
 		}
 	}
 	return false

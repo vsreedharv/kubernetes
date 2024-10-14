@@ -19,6 +19,7 @@ package kuberc
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"k8s.io/kubectl/pkg/config"
@@ -838,6 +839,556 @@ func TestApplyOverride(t *testing.T) {
 					actualFlag := actualCmd.Flag(expectedFlag.name)
 					if actualFlag.Value.String() != expectedFlag.value {
 						t.Fatalf("unexpected flag value expected %s actual %s", expectedFlag.value, actualFlag.Value.String())
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestApplOverrideBool(t *testing.T) {
+	tests := []testApplyOverride[bool]{
+		{
+			name: "command override",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:  "firstflag",
+							value: true,
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"command1",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "command1",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: false,
+				},
+			},
+		},
+		{
+			name: "command override explicit pass",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:  "firstflag",
+							value: true,
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"command1",
+				"--firstflag",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "command1",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+		},
+		{
+			name: "command override explicit pass with shorthand",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:      "firstflag",
+							value:     true,
+							shorthand: "f",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"command1",
+				"-f",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "command1",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+		},
+		{
+			name: "command override explicit pass with combined multiple shorthand",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:      "firstflag",
+							value:     false,
+							shorthand: "f",
+						},
+						{
+							name:      "secondflag",
+							value:     false,
+							shorthand: "v",
+						},
+						{
+							name:      "thirdflag",
+							value:     true,
+							shorthand: "d",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"command1",
+				"-dfv",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "command1",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmdtesting.WithAlphaEnvs([]util.FeatureGate{util.KubeRC}, t, func(t *testing.T) {
+				rootCmd := &cobra.Command{
+					Use: "root",
+				}
+				prefHandler := NewPreferences()
+				prefHandler.AddFlags(rootCmd.PersistentFlags())
+				pref, ok := prefHandler.(*Preferences)
+				if !ok {
+					t.Fatal("unexpected type. Expected *Preferences")
+				}
+				addCommands(rootCmd, test.nestedCmds)
+				pref.getPreferencesFunc = test.getPreferencesFunc
+				errWriter := &bytes.Buffer{}
+				_, err := pref.Apply(rootCmd, test.args, errWriter)
+				if err != nil {
+					t.Fatalf("unexpected error %v\n", err)
+				}
+				actualCmd, _, err := rootCmd.Find(test.args[1:])
+				if err != nil {
+					t.Fatalf("unable to find the command %v\n", err)
+				}
+
+				err = actualCmd.ParseFlags(test.args[1:])
+				if err != nil {
+					t.Fatalf("unexpected error %v\n", err)
+				}
+
+				if errWriter.String() != "" {
+					t.Fatalf("unexpected error message %s\n", errWriter.String())
+				}
+
+				for _, expectedFlag := range test.expectedFLags {
+					actualFlag := actualCmd.Flag(expectedFlag.name)
+					actualValue, err := strconv.ParseBool(actualFlag.Value.String())
+					if err != nil {
+						t.Fatalf("unexpected error %v\n", err)
+					}
+					if actualValue != expectedFlag.value {
+						t.Fatalf("unexpected flag value expected %t actual %s", expectedFlag.value, actualFlag.Value.String())
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestApplyAliasBool(t *testing.T) {
+	tests := []testApplyAlias[bool]{
+		{
+			name: "command override",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:  "firstflag",
+							value: false,
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "true",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+		{
+			name: "command override explicit pass",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:  "firstflag",
+							value: false,
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"--firstflag",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+		{
+			name: "command override explicit pass with shorthand",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:      "firstflag",
+							value:     false,
+							shorthand: "f",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"-f",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+		{
+			name: "command override explicit pass with combination of multiple shorthand",
+			nestedCmds: []fakeCmds[bool]{
+				{
+					name: "command1",
+					flags: []fakeFlag[bool]{
+						{
+							name:      "firstflag",
+							value:     false,
+							shorthand: "f",
+						},
+						{
+							name:      "secondflag",
+							value:     true,
+							shorthand: "v",
+						},
+						{
+							name:      "thirdflag",
+							value:     false,
+							shorthand: "d",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"-vfd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							Args: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "false",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[bool]{
+				{
+					name:  "firstflag",
+					value: true,
+				},
+				{
+					name:  "secondflag",
+					value: true,
+				},
+				{
+					name:  "thirdflag",
+					value: true,
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmdtesting.WithAlphaEnvs([]util.FeatureGate{util.KubeRC}, t, func(t *testing.T) {
+				rootCmd := &cobra.Command{
+					Use: "root",
+				}
+				prefHandler := NewPreferences()
+				prefHandler.AddFlags(rootCmd.PersistentFlags())
+				pref, ok := prefHandler.(*Preferences)
+				if !ok {
+					t.Fatal("unexpected type. Expected *Preferences")
+				}
+				addCommands(rootCmd, test.nestedCmds)
+				pref.getPreferencesFunc = test.getPreferencesFunc
+				errWriter := &bytes.Buffer{}
+				lastArgs, err := pref.Apply(rootCmd, test.args, errWriter)
+				if test.expectedErr == nil && err != nil {
+					t.Fatalf("unexpected error %v\n", err)
+				}
+				if test.expectedErr != nil {
+					if test.expectedErr.Error() != err.Error() {
+						t.Fatalf("error %s expected but actual is %s", test.expectedErr, err)
+					}
+					return
+				}
+
+				actualCmd, _, err := rootCmd.Find(lastArgs[1:])
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				err = actualCmd.ParseFlags(lastArgs)
+				if err != nil {
+					t.Fatalf("unexpected error %v\n", err)
+				}
+
+				if errWriter.String() != "" {
+					t.Fatalf("unexpected error message %s\n", errWriter.String())
+				}
+
+				if test.expectedCmd != actualCmd.Name() {
+					t.Fatalf("unexpected command expected %s actual %s", test.expectedCmd, actualCmd.Name())
+				}
+
+				for _, expectedFlag := range test.expectedFLags {
+					actualFlag := actualCmd.Flag(expectedFlag.name)
+					actualValue, err := strconv.ParseBool(actualFlag.Value.String())
+					if err != nil {
+						t.Fatalf("unexpected error %v\n", err)
+					}
+					if actualValue != expectedFlag.value {
+						t.Fatalf("unexpected flag value expected %t actual %s", expectedFlag.value, actualFlag.Value.String())
+					}
+				}
+
+				for _, expectedArg := range test.expectedArgs {
+					found := false
+					for _, actualArg := range lastArgs {
+						if actualArg == expectedArg {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Fatalf("expected arg %s can not be found", expectedArg)
 					}
 				}
 			})
