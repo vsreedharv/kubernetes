@@ -77,6 +77,12 @@ func NewPreferences() PreferencesHandler {
 	}
 }
 
+type aliasing struct {
+	args    []string
+	flags   []config.CommandOverrideFlag
+	command *cobra.Command
+}
+
 // AddFlags adds kuberc related flags into the command.
 func (p *Preferences) AddFlags(flags *pflag.FlagSet) {
 	flags.String("kuberc", "", "Path to the kuberc file to use for preferences.")
@@ -173,11 +179,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		return args, nil
 	}
 
-	aliasArgsMap := &struct {
-		args    []string
-		flags   []config.CommandOverrideFlag
-		command *cobra.Command
-	}{}
+	var aliasArgs *aliasing
 
 	var commandName string // first "non-flag" arguments
 	for _, arg := range args[1:] {
@@ -210,19 +212,21 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		newCmd.Use = alias.Name
 		aliasCmd := &newCmd
 
-		aliasArgsMap.args = alias.Args
-		aliasArgsMap.flags = alias.Flags
-		aliasArgsMap.command = aliasCmd
+		aliasArgs = &aliasing{
+			args:    alias.Args,
+			flags:   alias.Flags,
+			command: aliasCmd,
+		}
 		break
 	}
 
-	if aliasArgsMap == nil {
+	if aliasArgs == nil {
 		// pursue with the current behavior.
 		// This might be a built-in command, external plugin, etc.
 		return args, nil
 	}
 
-	rootCmd.AddCommand(aliasArgsMap.command)
+	rootCmd.AddCommand(aliasArgs.command)
 
 	foundAliasCmd, _, err := rootCmd.Find([]string{commandName})
 	if err != nil {
@@ -232,7 +236,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 	// This function triggers merging the persistent flags in the parent commands.
 	_ = foundAliasCmd.InheritedFlags()
 
-	for _, fl := range aliasArgsMap.flags {
+	for _, fl := range aliasArgs.flags {
 		existingFlag := foundAliasCmd.Flag(fl.Name)
 		if existingFlag == nil {
 			return args, fmt.Errorf("invalid alias flag %s in alias %s", fl.Name, args[0])
@@ -248,7 +252,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 	}
 
 	// all args defined in kuberc should be appended to actual args.
-	args = append(args, aliasArgsMap.args...)
+	args = append(args, aliasArgs.args...)
 	// Cobra (command.go#L1078) appends only root command's args into the actual args and ignores the others.
 	// We are appending the additional args defined in kuberc in here and
 	// expect that it will be passed along to the actual command.
