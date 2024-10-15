@@ -1610,7 +1610,39 @@ func getPhase(pod *v1.Pod, info []v1.ContainerStatus, podIsTerminal bool) v1.Pod
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.SidecarContainers) {
 		// restartable init containers
-		pendingRestartableInitContainers, unknown, running, waiting = handleRestartableInitContainers(spec, info, unknown, running, waiting)
+		for _, container := range spec.InitContainers {
+			if !kubetypes.IsRestartableInitContainer(&container) {
+				// Skip the regular init containers, as they have been handled above.
+				continue
+			}
+			containerStatus, ok := podutil.GetContainerStatus(info, container.Name)
+			if !ok {
+				unknown++
+				continue
+			}
+
+			switch {
+			case containerStatus.State.Running != nil:
+				if containerStatus.Started == nil || !*containerStatus.Started {
+					pendingRestartableInitContainers++
+				}
+				running++
+			case containerStatus.State.Terminated != nil:
+				// Do nothing here, as terminated restartable init containers are not
+				// taken into account for the pod phase.
+			case containerStatus.State.Waiting != nil:
+				if containerStatus.LastTerminationState.Terminated != nil {
+					// Do nothing here, as terminated restartable init containers are not
+					// taken into account for the pod phase.
+				} else {
+					pendingRestartableInitContainers++
+					waiting++
+				}
+			default:
+				pendingRestartableInitContainers++
+				unknown++
+			}
+		}
 	}
 
 	for _, container := range spec.Containers {
@@ -1644,11 +1676,12 @@ func getPhase(pod *v1.Pod, info []v1.ContainerStatus, podIsTerminal bool) v1.Pod
 	}
 
 	switch {
-	case pendingRegularInitContainers > 0 || (pendingRestartableInitContainers > 0 &&
-		// This is needed to handle the case where the pod has been initialized but
-		// the restartable init containers are restarting and the pod should not be
-		// placed back into v1.PodPending since the regular containers have run.
-		!kubecontainer.HasAnyRegularContainerStarted(&spec, info)):
+	case pendingRegularInitContainers > 0 ||
+		(pendingRestartableInitContainers > 0 &&
+			// This is needed to handle the case where the pod has been initialized but
+			// the restartable init containers are restarting and the pod should not be
+			// placed back into v1.PodPending since the regular containers have run.
+			!kubecontainer.HasAnyRegularContainerStarted(&spec, info)):
 		fallthrough
 	case waiting > 0:
 		klog.V(5).InfoS("Pod waiting > 0, pending")
@@ -1695,46 +1728,6 @@ func getPhase(pod *v1.Pod, info []v1.ContainerStatus, podIsTerminal bool) v1.Pod
 		klog.V(5).InfoS("Pod default case, pending")
 		return v1.PodPending
 	}
-}
-
-// handleRestartableInitContainers handles restartable initialization containers.
-func handleRestartableInitContainers(spec v1.PodSpec, info []v1.ContainerStatus, unknown, running, waiting int) (int, int, int, int) {
-	pendingRestartableInitContainers := 0
-
-	for _, container := range spec.InitContainers {
-		if !kubetypes.IsRestartableInitContainer(&container) {
-			// Skip the regular init containers, as they have been handled above.
-			continue
-		}
-		containerStatus, ok := podutil.GetContainerStatus(info, container.Name)
-		if !ok {
-			unknown++
-			continue
-		}
-
-		switch {
-		case containerStatus.State.Running != nil:
-			if containerStatus.Started == nil || !*containerStatus.Started {
-				pendingRestartableInitContainers++
-			}
-			running++
-		case containerStatus.State.Terminated != nil:
-			// Do nothing here, as terminated restartable init containers are not
-			// taken into account for the pod phase.
-		case containerStatus.State.Waiting != nil:
-			if containerStatus.LastTerminationState.Terminated != nil {
-				// Do nothing here, as terminated restartable init containers are not
-				// taken into account for the pod phase.
-			} else {
-				pendingRestartableInitContainers++
-				waiting++
-			}
-		default:
-			pendingRestartableInitContainers++
-			unknown++
-		}
-	}
-	return pendingRestartableInitContainers, unknown, running, waiting
 }
 
 func deleteCustomResourceFromResourceRequirements(target *v1.ResourceRequirements) {
