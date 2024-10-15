@@ -18,6 +18,9 @@ package e2enode
 
 import (
 	"context"
+	"fmt"
+	"time"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -76,19 +79,13 @@ var _ = SIGDescribe(framework.WithSerial(), "Pods status phase", func() {
 		client := e2epod.NewPodClient(f)
 		pod = client.Create(ctx, pod)
 
-		ginkgo.By("Waiting for the regular container to be started")
-		err := e2epod.WaitForPodContainerStarted(ctx, f.ClientSet, pod.Namespace, pod.Name, 0, f.Timeouts.PodStart)
+		ginkgo.By("Waiting for the pod's status to become Running")
+		err := e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace)
 		framework.ExpectNoError(err)
-		pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		if pod.Status.Phase != v1.PodRunning {
-			framework.Failf("pod should be running before restarting the kubelet")
-		}
 
 		ginkgo.By("Getting the current pod sandbox ID")
 		rs, _, err := getCRIClient()
 		framework.ExpectNoError(err)
-
 		sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
 			LabelSelector: podLabels,
 		})
@@ -96,18 +93,22 @@ var _ = SIGDescribe(framework.WithSerial(), "Pods status phase", func() {
 		gomega.Expect(sandboxes).To(gomega.HaveLen(1))
 		podSandboxID := sandboxes[0].Id
 
+		// We need to wait for the pod to be Running before simulating the node reboot,
+		// to avoid any unintended effects from the previous init container state.
+		// Simulate node reboot by restarting the kubelet and the pod sandbox.
 		ginkgo.By("Stopping the kubelet")
-		restartKubelet := stopKubelet()
+		startKubelet := stopKubelet()
 		gomega.Eventually(ctx, func() bool {
 			return kubeletHealthCheck(kubeletHealthCheckURL)
 		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet should be stopped"))
 
-		ginkgo.By("Stopping the pod sandbox to simulate the node reboot")
+		ginkgo.By("Stopping the pod sandbox")
 		err = rs.StopPodSandbox(ctx, podSandboxID)
 		framework.ExpectNoError(err)
 
-		ginkgo.By("Restarting the kubelet")
-		restartKubelet()
+		ginkgo.By("Starting the kubelet")
+		startKubelet()
+		kubeletRestartedTime := time.Now().UTC()
 		gomega.Eventually(ctx, func() bool {
 			return kubeletHealthCheck(kubeletHealthCheckURL)
 		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be started"))
@@ -115,8 +116,25 @@ var _ = SIGDescribe(framework.WithSerial(), "Pods status phase", func() {
 		ginkgo.By("Waiting for the regular init container to be started after the node reboot")
 		err = e2epod.WaitForPodInitContainerStarted(ctx, f.ClientSet, pod.Namespace, pod.Name, 0, f.Timeouts.PodStart)
 		framework.ExpectNoError(err)
+
 		pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err)
 		gomega.Expect(pod.Status.Phase == v1.PodPending).To(gomega.BeTrueBecause("pod should be pending during the execution of the init container after the node reboot"))
+
+		ginkgo.By("Get the logs of the init container after the kubelet restart")
+		logs, err := f.ClientSet.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &v1.PodLogOptions{
+			Container: init,
+			SinceTime: &metav1.Time{ // Use the time when the kubelet was restarted as the start point for the logs
+				Time: kubeletRestartedTime,
+			},
+		}).DoRaw(ctx)
+		framework.ExpectNoError(err)
+		// The `container Starting` log is generated in ExecCommand.
+		expectedLog := fmt.Sprintf("%s Starting", init)
+		gomega.Expect(string(logs)).To(gomega.ContainSubstring(expectedLog), "The logs should contain the expected output from the init container after the kubelet restart")
+
+		ginkgo.By("Verifying that the pod fully starts")
+		err = e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace)
+		framework.ExpectNoError(err)
 	})
 })
