@@ -148,12 +148,19 @@ func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Pref
 		// This function triggers merging the persistent flags in the parent commands.
 		_ = cmd.InheritedFlags()
 
+		allShorthands := make(map[string]struct{})
+		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+			if flag.Shorthand != "" {
+				allShorthands[flag.Shorthand] = struct{}{}
+			}
+		})
+
 		for _, fl := range c.Flags {
 			existingFlag := cmd.Flag(fl.Name)
 			if existingFlag == nil {
 				return fmt.Errorf("invalid flag %s for command %s", fl.Name, c.Command)
 			}
-			if searchInArgs(existingFlag.Name, existingFlag.Shorthand, cmd.Flags(), args) {
+			if searchInArgs(existingFlag.Name, existingFlag.Shorthand, allShorthands, args) {
 				// Don't modify the value implicitly, if it is passed in args explicitly
 				continue
 			}
@@ -188,7 +195,6 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 			break
 		}
 	}
-	commandName = strings.TrimSpace(commandName)
 
 	for _, alias := range kuberc.Aliases {
 		p.aliases[alias.Name] = struct{}{}
@@ -236,12 +242,19 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 	// This function triggers merging the persistent flags in the parent commands.
 	_ = foundAliasCmd.InheritedFlags()
 
+	allShorthands := make(map[string]struct{})
+	foundAliasCmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Shorthand != "" {
+			allShorthands[flag.Shorthand] = struct{}{}
+		}
+	})
+
 	for _, fl := range aliasArgs.flags {
 		existingFlag := foundAliasCmd.Flag(fl.Name)
 		if existingFlag == nil {
 			return args, fmt.Errorf("invalid alias flag %s in alias %s", fl.Name, args[0])
 		}
-		if searchInArgs(existingFlag.Name, existingFlag.Shorthand, foundAliasCmd.Flags(), args) {
+		if searchInArgs(existingFlag.Name, existingFlag.Shorthand, allShorthands, args) {
 			// Don't modify the value implicitly, if it is passed in args explicitly
 			continue
 		}
@@ -342,7 +355,7 @@ func getExplicitKuberc(args []string) string {
 
 // searchInArgs searches the given key in the args and returns
 // true, if it finds. Otherwise, it returns false.
-func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args []string) bool {
+func searchInArgs(flagName string, shorthand string, allShorthands map[string]struct{}, args []string) bool {
 	for _, arg := range args {
 		// if flag is set in args in "--flag value" or "--flag=value" format,
 		// we should return it as found
@@ -369,10 +382,6 @@ func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args 
 		// First we need to ensure that all the values are shorthand to safely search ours.
 		// Because we know that "-abcvalue" is not valid. So that we need to be sure that if we find
 		// "b" it correctly refers to the shorthand "b" not arbitrary value "-cargb".
-		allShorthands := make(map[string]struct{})
-		flags.VisitAll(func(flag *pflag.Flag) {
-			allShorthands[flag.Shorthand] = struct{}{}
-		})
 		arbitraryFound := false
 		for _, runeValue := range shorthand {
 			if _, ok := allShorthands[string(runeValue)]; !ok {
