@@ -44,10 +44,10 @@ var (
 	RecommendedKubeRCFile = filepath.Join(RecommendedConfigDir, RecommendedKubeRCFileName)
 
 	aliasNameRegex = regexp.MustCompile("^[a-zA-Z]+$")
-	shortHandRegex = regexp.MustCompile("^-[a-zA-Z]([-a-zA-Z]*)$")
+	shortHandRegex = regexp.MustCompile("^-[a-zA-Z]+$")
 
 	scheme = runtime.NewScheme()
-	codecs = serializer.NewCodecFactory(scheme)
+	codecs = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
 )
 
 func init() {
@@ -85,7 +85,7 @@ type aliasing struct {
 
 // AddFlags adds kuberc related flags into the command.
 func (p *Preferences) AddFlags(flags *pflag.FlagSet) {
-	flags.String("kuberc", "", "Path to the kuberc file to use for preferences.")
+	flags.String("kuberc", "", "Path to the kuberc file to use for preferences. This can be disabled by exporting KUBECTL_KUBERC=false.")
 }
 
 // Apply firstly applies the aliases in the preferences file and secondly overrides
@@ -344,10 +344,9 @@ func getExplicitKuberc(args []string) string {
 // true, if it finds. Otherwise, it returns false.
 func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args []string) bool {
 	for _, arg := range args {
-		sanitizedArg := strings.TrimSpace(arg)
 		// if flag is set in args in "--flag value" or "--flag=value" format,
 		// we should return it as found
-		if fmt.Sprintf("--%s", flagName) == sanitizedArg || strings.HasPrefix(sanitizedArg, fmt.Sprintf("--%s=", flagName)) {
+		if fmt.Sprintf("--%s", flagName) == arg || strings.HasPrefix(arg, fmt.Sprintf("--%s=", flagName)) {
 			return true
 		}
 		if shorthand == "" {
@@ -356,16 +355,16 @@ func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args 
 		// shorthand can be in "-n value" or "-nvalue" format
 		// it is guaranteed that shorthand is one letter. So that
 		// checking just the prefix -oyaml also finds --output.
-		if strings.HasPrefix(sanitizedArg, fmt.Sprintf("-%s", shorthand)) {
+		if strings.HasPrefix(arg, fmt.Sprintf("-%s", shorthand)) {
 			return true
 		}
 
-		if !shortHandRegex.MatchString(sanitizedArg) {
+		if !shortHandRegex.MatchString(arg) {
 			continue
 		}
 
 		// remove prefix "-"
-		sanitizedArg = sanitizedArg[1:]
+		arg = arg[1:]
 		// short hands can be in a combined "-abc" format.
 		// First we need to ensure that all the values are shorthand to safely search ours.
 		// Because we know that "-abcvalue" is not valid. So that we need to be sure that if we find
@@ -385,7 +384,7 @@ func searchInArgs(flagName string, shorthand string, flags *pflag.FlagSet, args 
 			continue
 		}
 		// verified that all values are short hand. Now search ours
-		if strings.Contains(sanitizedArg, shorthand) {
+		if strings.Contains(arg, shorthand) {
 			return true
 		}
 	}
