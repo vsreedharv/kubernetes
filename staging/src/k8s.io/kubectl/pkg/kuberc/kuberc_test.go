@@ -52,6 +52,7 @@ type testApplyOverride[T supportedTypes] struct {
 	args               []string
 	getPreferencesFunc func(kuberc string) (*config.Preference, error)
 	expectedFLags      []fakeFlag[T]
+	expectedErr        error
 }
 
 type testApplyAlias[T supportedTypes] struct {
@@ -800,6 +801,99 @@ func TestApplyOverride(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "alias ignores command override",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"alias",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "command1",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "alias",
+							Command: "command1",
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "test",
+				},
+			},
+		},
+		{
+			name: "alias command override",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"testalias",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Overrides: []config.CommandOverride{
+						{
+							Command: "testalias",
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "testalias",
+							Command: "command1",
+						},
+					},
+				}, nil
+			},
+			expectedErr: fmt.Errorf("alias testalias can not be overridden"),
+		},
 	}
 
 	for _, test := range tests {
@@ -818,9 +912,16 @@ func TestApplyOverride(t *testing.T) {
 				pref.getPreferencesFunc = test.getPreferencesFunc
 				errWriter := &bytes.Buffer{}
 				_, err := pref.Apply(rootCmd, test.args, errWriter)
-				if err != nil {
+				if test.expectedErr == nil && err != nil {
 					t.Fatalf("unexpected error %v\n", err)
 				}
+				if test.expectedErr != nil {
+					if test.expectedErr.Error() != err.Error() {
+						t.Fatalf("error %s expected but actual is %s", test.expectedErr, err)
+					}
+					return
+				}
+
 				actualCmd, _, err := rootCmd.Find(test.args[1:])
 				if err != nil {
 					t.Fatalf("unable to find the command %v\n", err)
