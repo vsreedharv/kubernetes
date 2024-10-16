@@ -2288,8 +2288,9 @@ func TestApplyAlias(t *testing.T) {
 
 func TestGetExplicitKuberc(t *testing.T) {
 	tests := []struct {
-		args     []string
-		expected string
+		args        []string
+		expected    string
+		expectedErr error
 	}{
 		{
 			args:     []string{"kubectl", "get", "--kuberc", "/tmp/filepath"},
@@ -2308,13 +2309,26 @@ func TestGetExplicitKuberc(t *testing.T) {
 			expected: "/tmp/filepath",
 		},
 		{
+			args:        []string{"kubectl", "get", "--kuberc="},
+			expectedErr: fmt.Errorf("kuberc file is not found"),
+		},
+		{
+			args:        []string{"kubectl", "get", "--kuberc"},
+			expectedErr: fmt.Errorf("kuberc file is not found"),
+		},
+		{
 			args:     []string{"kubectl", "get", "--", "/bin/bash", "--kuberc", "anotherpath"},
 			expected: "",
 		},
 	}
 	for _, test := range tests {
 		t.Run("", func(t *testing.T) {
-			actual := getExplicitKuberc(test.args)
+			actual, err := getExplicitKuberc(test.args)
+			if err != nil {
+				if err.Error() != test.expectedErr.Error() {
+					t.Fatalf("unexpected error %v\n", err)
+				}
+			}
 			if test.expected != actual {
 				t.Fatalf("unexpected value %s expected %s", actual, test.expected)
 			}
