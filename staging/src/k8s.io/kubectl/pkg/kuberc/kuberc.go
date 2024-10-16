@@ -129,7 +129,6 @@ func (p *Preferences) applyOverrides(rootCmd *cobra.Command, kuberc *config.Pref
 	args = args[1:]
 	cmd, _, err := rootCmd.Find(args)
 	if err != nil {
-		fmt.Fprintf(errOut, "Warning: command not found %v\n", err)
 		return nil
 	}
 
