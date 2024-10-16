@@ -95,7 +95,10 @@ func (p *Preferences) Apply(rootCmd *cobra.Command, args []string, errOut io.Wri
 		return args, nil
 	}
 
-	kubercPath := getExplicitKuberc(args)
+	kubercPath, err := getExplicitKuberc(args)
+	if err != nil {
+		return args, err
+	}
 	kuberc, err := p.getPreferencesFunc(kubercPath)
 	if err != nil {
 		return args, fmt.Errorf("kuberc error %w", err)
@@ -324,7 +327,7 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 // However, flag values are set during the command execution and
 // we are in very early stages to prepare commands prior to execute them.
 // Besides, we only need kuberc flag value in this stage.
-func getExplicitKuberc(args []string) string {
+func getExplicitKuberc(args []string) (string, error) {
 	var kubercPath string
 	for i, arg := range args {
 		if arg == "--" {
@@ -337,20 +340,22 @@ func getExplicitKuberc(args []string) string {
 				kubercPath = args[i+1]
 				break
 			}
+			return "", fmt.Errorf("kuberc file is not found")
 		} else if strings.Contains(arg, "--kuberc=") {
 			parg := strings.Split(arg, "=")
-			if len(parg) > 1 {
+			if len(parg) > 1 && parg[1] != "" {
 				kubercPath = parg[1]
 				break
 			}
+			return "", fmt.Errorf("kuberc file is not found")
 		}
 	}
 
 	if kubercPath == "" {
-		return ""
+		return "", nil
 	}
 
-	return kubercPath
+	return kubercPath, nil
 }
 
 // searchInArgs searches the given key in the args and returns
