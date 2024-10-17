@@ -34,7 +34,7 @@ type Preference struct {
 	// If the alias name collides with a built-in command, built-in command always takes precedence.
 	// kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to
 	// kubectl [COMMAND] # built-in command alias points to
-	//		   [KUBERC_PREPEND_ARGS]
+	//         [KUBERC_PREPEND_ARGS]
 	//         [USER_FLAGS]
 	//         [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]
 	//         [USER_EXPLICIT_ARGS]
@@ -57,8 +57,8 @@ type Preference struct {
 	//     default: wide
 	//   prependArgs:
 	//   - node
-	// "kubectl getn control-plane-1" expands to "kubectl get node --output=wide"
-	// "kubectl getn controlplane-1 --output=json" expands to "kubectl get node --output=json controlplane-1"
+	// "kubectl getn control-plane-1" expands to "kubectl get node control-plane-1 --output=wide"
+	// "kubectl getn control-plane-1 --output=json" expands to "kubectl get node --output=json control-plane-1"
 	// +optional
 	Aliases []AliasOverride
 }
@@ -72,8 +72,7 @@ type AliasOverride struct {
 	// Command is the single or set of commands to execute, such as "set env" or "create"
 	Command string
 	// PrependArgs stores the arguments such as resource names, etc.
-	// These arguments are inserted after the command and before the flags
-	// to ensure that they are prepended to the USER_ARGS.
+	// These arguments are inserted after the alias name.
 	PrependArgs []string
 	// AppendArgs stores the arguments such as resource names, etc.
 	// These arguments are appended to the USER_ARGS.
