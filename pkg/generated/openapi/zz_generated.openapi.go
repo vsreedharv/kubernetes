@@ -61065,14 +61065,29 @@ func schema_kubectl_pkg_config_v1alpha1_AliasOverride(ref common.ReferenceCallba
 							Format:      "",
 						},
 					},
-					"args": {
+					"prependArgs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PrependArgs stores the arguments such as resource names, etc. These arguments are inserted after the command and before the flags to ensure that they are prepended to the USER_ARGS.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"appendArgs": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
 								"x-kubernetes-list-type": "atomic",
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Arguments is allocated for the arguments such as resource names, etc. These arguments are appended after the explicitly defined arguments.",
+							Description: "AppendArgs stores the arguments such as resource names, etc. These arguments are appended to the USER_ARGS.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -61233,7 +61248,7 @@ func schema_kubectl_pkg_config_v1alpha1_Preference(ref common.ReferenceCallback)
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "aliases allows defining command aliases for existing kubectl commands, with optional default flag values. If the alias name collides with a built-in command, built-in command always takes precedence. kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to kubectl [COMMAND] # built-in command alias points to\n        [USER_FLAGS]\n        [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]\n        [USER_EXPLICIT_ARGS]\n        [KUBERC_ALIAS_ARGUMENTS]\ne.g. - name: runx\n  command: run\n  flags:\n  - name: image\n    default: nginx\n  args:\n  - --\n  - custom-arg1\nFor example, if user invokes \"kubectl runx test-pod\" command, this will be expanded to \"kubectl run --image=nginx test-pod -- custom-arg1\"",
+							Description: "aliases allows defining command aliases for existing kubectl commands, with optional default flag values. If the alias name collides with a built-in command, built-in command always takes precedence. kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to kubectl [COMMAND] # built-in command alias points to\n\t\t   [KUBERC_PREPEND_ARGS]\n        [USER_FLAGS]\n        [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]\n        [USER_EXPLICIT_ARGS]\n        [KUBERC_APPEND_ARGS]\ne.g. - name: runx\n  command: run\n  flags:\n  - name: image\n    default: nginx\n  appendArgs:\n  - --\n  - custom-arg1\nFor example, if user invokes \"kubectl runx test-pod\" command, this will be expanded to \"kubectl run --image=nginx test-pod -- custom-arg1\" - name: getn\n  command: get\n  flags:\n  - name: output\n    default: wide\n  prependArgs:\n  - node\n\"kubectl getn control-plane-1\" expands to \"kubectl get node --output=wide\" \"kubectl getn controlplane-1 --output=json\" expands to \"kubectl get node --output=json controlplane-1\"",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

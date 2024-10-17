@@ -34,21 +34,31 @@ type Preference struct {
 	// If the alias name collides with a built-in command, built-in command always takes precedence.
 	// kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to
 	// kubectl [COMMAND] # built-in command alias points to
+	//		   [KUBERC_PREPEND_ARGS]
 	//         [USER_FLAGS]
 	//         [KUBERC_FLAGS] # rest of the flags that are not passed by user in [USER_FLAGS]
 	//         [USER_EXPLICIT_ARGS]
-	//         [KUBERC_ALIAS_ARGUMENTS]
+	//         [KUBERC_APPEND_ARGS]
 	// e.g.
 	// - name: runx
 	//   command: run
 	//   flags:
 	//   - name: image
 	//     default: nginx
-	//   args:
+	//   appendArgs:
 	//   - --
 	//   - custom-arg1
 	// For example, if user invokes "kubectl runx test-pod" command,
 	// this will be expanded to "kubectl run --image=nginx test-pod -- custom-arg1"
+	// - name: getn
+	//   command: get
+	//   flags:
+	//   - name: output
+	//     default: wide
+	//   prependArgs:
+	//   - node
+	// "kubectl getn control-plane-1" expands to "kubectl get node --output=wide"
+	// "kubectl getn controlplane-1 --output=json" expands to "kubectl get node --output=json controlplane-1"
 	// +listType=atomic
 	Aliases []AliasOverride `json:"aliases"`
 }
@@ -61,10 +71,14 @@ type AliasOverride struct {
 	Name string `json:"name"`
 	// Command is the single or set of commands to execute, such as "set env" or "create"
 	Command string `json:"command"`
-	// Arguments is allocated for the arguments such as resource names, etc.
-	// These arguments are appended after the explicitly defined arguments.
+	// PrependArgs stores the arguments such as resource names, etc.
+	// These arguments are inserted after the command and before the flags
+	// to ensure that they are prepended to the USER_ARGS.
+	PrependArgs []string `json:"prependArgs,omitempty"`
+	// AppendArgs stores the arguments such as resource names, etc.
+	// These arguments are appended to the USER_ARGS.
 	// +listType=atomic
-	Args []string `json:"args,omitempty"`
+	AppendArgs []string `json:"appendArgs,omitempty"`
 	// Flag is allocated to store the flag definitions of alias.
 	// Flag only modifies the default value of the flag and if
 	// user explicitly passes a value, explicit one is used.

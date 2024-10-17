@@ -82,7 +82,8 @@ func RegisterConversions(s *runtime.Scheme) error {
 func autoConvert_v1alpha1_AliasOverride_To_config_AliasOverride(in *AliasOverride, out *config.AliasOverride, s conversion.Scope) error {
 	out.Name = in.Name
 	out.Command = in.Command
-	out.Args = *(*[]string)(unsafe.Pointer(&in.Args))
+	out.PrependArgs = *(*[]string)(unsafe.Pointer(&in.PrependArgs))
+	out.AppendArgs = *(*[]string)(unsafe.Pointer(&in.AppendArgs))
 	out.Flags = *(*[]config.CommandOverrideFlag)(unsafe.Pointer(&in.Flags))
 	return nil
 }
@@ -95,7 +96,8 @@ func Convert_v1alpha1_AliasOverride_To_config_AliasOverride(in *AliasOverride, o
 func autoConvert_config_AliasOverride_To_v1alpha1_AliasOverride(in *config.AliasOverride, out *AliasOverride, s conversion.Scope) error {
 	out.Name = in.Name
 	out.Command = in.Command
-	out.Args = *(*[]string)(unsafe.Pointer(&in.Args))
+	out.PrependArgs = *(*[]string)(unsafe.Pointer(&in.PrependArgs))
+	out.AppendArgs = *(*[]string)(unsafe.Pointer(&in.AppendArgs))
 	out.Flags = *(*[]CommandOverrideFlag)(unsafe.Pointer(&in.Flags))
 	return nil
 }
