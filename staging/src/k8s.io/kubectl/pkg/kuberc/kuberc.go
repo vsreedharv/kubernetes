@@ -78,9 +78,10 @@ func NewPreferences() PreferencesHandler {
 }
 
 type aliasing struct {
-	args    []string
-	flags   []config.CommandOverrideFlag
-	command *cobra.Command
+	appendArgs  []string
+	prependArgs []string
+	flags       []config.CommandOverrideFlag
+	command     *cobra.Command
 }
 
 // AddFlags adds kuberc related flags into the command.
@@ -191,9 +192,11 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 	var aliasArgs *aliasing
 
 	var commandName string // first "non-flag" arguments
-	for _, arg := range args[1:] {
+	var commandIndex int
+	for index, arg := range args[1:] {
 		if !strings.HasPrefix(arg, "-") {
 			commandName = arg
+			commandIndex = index + 1
 			break
 		}
 	}
@@ -221,9 +224,10 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		aliasCmd := &newCmd
 
 		aliasArgs = &aliasing{
-			args:    alias.Args,
-			flags:   alias.Flags,
-			command: aliasCmd,
+			prependArgs: alias.PrependArgs,
+			appendArgs:  alias.AppendArgs,
+			flags:       alias.Flags,
+			command:     aliasCmd,
 		}
 		break
 	}
@@ -266,8 +270,19 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 		}
 	}
 
-	// all args defined in kuberc should be appended to actual args.
-	args = append(args, aliasArgs.args...)
+	if len(aliasArgs.prependArgs) > 0 {
+		// prependArgs defined in kuberc should be inserted after the alias name.
+		if commandIndex+1 >= len(args) {
+			// command is the last item, we simply append just like appendArgs
+			args = append(args, aliasArgs.prependArgs...)
+		} else {
+			args = append(args[:commandIndex+1], append(aliasArgs.prependArgs, args[commandIndex+1:]...)...)
+		}
+	}
+	if len(aliasArgs.appendArgs) > 0 {
+		// appendArgs defined in kuberc should be appended to actual args.
+		args = append(args, aliasArgs.appendArgs...)
+	}
 	// Cobra (command.go#L1078) appends only root command's args into the actual args and ignores the others.
 	// We are appending the additional args defined in kuberc in here and
 	// expect that it will be passed along to the actual command.

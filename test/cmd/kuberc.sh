@@ -34,8 +34,15 @@ kind: Preference
 aliases:
 - name: crns
   command: create namespace
-  args:
+  appendArgs:
    - test-kuberc-ns
+- name: getn
+  command: get
+  prependArgs:
+   - namespace
+  flags:
+   - name: output
+     default: wide
 - name: crole
   command: create role
   flags:
@@ -57,14 +64,14 @@ aliases:
     default: DNS_DOMAIN=test
   - name: namespace
     default: test-kuberc-ns
-  args:
+  appendArgs:
   - test-pod-2
   - --
   - custom-arg1
   - custom-arg2
 - name: setx
   command: set image
-  args:
+  appendArgs:
   - pod/test-pod-2
   - test-pod-2=busybox
 overrides:
@@ -92,6 +99,16 @@ EOF
   kube::test::get_object_assert 'namespaces' "{{range.items}}{{ if eq ${id_field:?} \"test-kuberc-ns\" }}found{{end}}{{end}}:" ':'
   # Alias command crns successfully creates namespace
   kubectl crns --kuberc="${TMPDIR:-/tmp}"/kuberc_file
+  # Post-condition: namespace 'test-kuberc-ns' is created.
+  kube::test::get_object_assert 'namespaces/test-kuberc-ns' "{{$id_field}}" 'test-kuberc-ns'
+
+  # Alias command crns successfully creates namespace
+  kubectl getn --kuberc="${TMPDIR:-/tmp}"/kuberc_file test-kuberc-ns
+  # Post-condition: namespace 'test-kuberc-ns' is created.
+  kube::test::get_object_assert 'namespaces/test-kuberc-ns' "{{$id_field}}" 'test-kuberc-ns'
+
+  # Alias command crns successfully creates namespace
+  kubectl getn test-kuberc-ns --output=json --kuberc="${TMPDIR:-/tmp}"/kuberc_file
   # Post-condition: namespace 'test-kuberc-ns' is created.
   kube::test::get_object_assert 'namespaces/test-kuberc-ns' "{{$id_field}}" 'test-kuberc-ns'
 

@@ -1215,7 +1215,7 @@ func TestApplyAliasBool(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1269,7 +1269,7 @@ func TestApplyAliasBool(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1324,7 +1324,7 @@ func TestApplyAliasBool(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1389,7 +1389,7 @@ func TestApplyAliasBool(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1526,7 +1526,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1550,6 +1550,301 @@ func TestApplyAlias(t *testing.T) {
 			expectedArgs: []string{
 				"resources",
 				"nodes",
+			},
+		},
+		{
+			name: "command override prependArgs",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							PrependArgs: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "changed",
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+			},
+		},
+		{
+			name: "command override prependArgs with args",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"arg1",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							PrependArgs: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "changed",
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+				"arg1",
+			},
+		},
+		{
+			name: "command override prependArgs with appendArgs",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							PrependArgs: []string{
+								"resources",
+								"nodes",
+							},
+							AppendArgs: []string{
+								"arg1",
+								"arg2",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "changed",
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+				"arg1",
+				"arg2",
+			},
+		},
+		{
+			name: "command override prependArgs with appendArgs with args",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"arg1",
+				"arg2",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							PrependArgs: []string{
+								"resources",
+								"nodes",
+							},
+							AppendArgs: []string{
+								"arg3",
+								"arg4",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "changed",
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+				"arg1",
+				"arg2",
+				"arg3",
+				"arg4",
+			},
+		},
+		{
+			name: "command override prependArgs with appendArgs with args with flagas",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+				"arg1",
+				"--firstflag",
+				"explicit",
+				"arg2",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							PrependArgs: []string{
+								"resources",
+								"nodes",
+							},
+							AppendArgs: []string{
+								"arg3",
+								"arg4",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedFLags: []fakeFlag[string]{
+				{
+					name:  "firstflag",
+					value: "explicit",
+				},
+			},
+			expectedCmd: "getcmd",
+			expectedArgs: []string{
+				"resources",
+				"nodes",
+				"arg1",
+				"arg2",
+				"arg3",
+				"arg4",
 			},
 		},
 		{
@@ -1579,7 +1874,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1593,7 +1888,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1636,7 +1931,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd!!",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1679,7 +1974,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd subalias",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1723,7 +2018,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1778,7 +2073,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1834,7 +2129,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1893,7 +2188,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "getcmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -1950,7 +2245,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -2004,7 +2299,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -2058,7 +2353,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "command1",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -2124,7 +2419,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "command1 command2",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
@@ -2190,7 +2485,7 @@ func TestApplyAlias(t *testing.T) {
 						{
 							Name:    "aliascmd",
 							Command: "   command1   command2  ",
-							Args: []string{
+							AppendArgs: []string{
 								"resources",
 								"nodes",
 							},
