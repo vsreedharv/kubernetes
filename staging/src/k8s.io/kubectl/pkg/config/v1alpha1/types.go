@@ -73,6 +73,7 @@ type AliasOverride struct {
 	Command string `json:"command"`
 	// PrependArgs stores the arguments such as resource names, etc.
 	// These arguments are inserted after the alias name.
+	// +listType=atomic
 	PrependArgs []string `json:"prependArgs,omitempty"`
 	// AppendArgs stores the arguments such as resource names, etc.
 	// These arguments are appended to the USER_ARGS.

@@ -61066,6 +61066,11 @@ func schema_kubectl_pkg_config_v1alpha1_AliasOverride(ref common.ReferenceCallba
 						},
 					},
 					"prependArgs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "PrependArgs stores the arguments such as resource names, etc. These arguments are inserted after the alias name.",
 							Type:        []string{"array"},
