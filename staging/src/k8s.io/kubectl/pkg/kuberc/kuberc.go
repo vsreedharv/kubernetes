@@ -221,6 +221,7 @@ func (p *Preferences) applyAliases(rootCmd *cobra.Command, kuberc *config.Prefer
 
 		newCmd := *existingCmd
 		newCmd.Use = alias.Name
+		newCmd.Aliases = []string{}
 		aliasCmd := &newCmd
 
 		aliasArgs = &aliasing{
