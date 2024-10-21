@@ -3053,7 +3053,7 @@ func (kl *Kubelet) UnprepareDynamicResources(ctx context.Context, pod *v1.Pod) e
 	return kl.containerManager.UnprepareDynamicResources(ctx, pod)
 }
 
-// staticPodRegistration ensures that all static pods are registered to the apiserver
+// initialStaticPodsRegistration ensures that all static pods are registered to the apiserver
 // before node became ready.
 func (kl *Kubelet) initialStaticPodsRegistration() error {
 	// kubelet running in standalone mode does not register static pods to the apiserver.
