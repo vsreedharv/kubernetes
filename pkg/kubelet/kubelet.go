@@ -46,6 +46,7 @@ import (
 	netutils "k8s.io/utils/net"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -3063,10 +3064,13 @@ func (kl *Kubelet) initialStaticPodsRegistration() error {
 	if kl.initialStaticPodsRegistered.Load() {
 		return nil
 	}
+	if _, err := kl.GetNode(); apierrors.IsNotFound(err) {
+		return errors.New("unable to check static pods are registered because node is not registered yet")
+	}
 	staticPodToMirrorPodMap := kl.podManager.GetStaticPodToMirrorPodMap()
-	for _, mirrorPod := range staticPodToMirrorPodMap {
-		if mirrorPod == nil {
-			return fmt.Errorf("not all static pods are registered")
+	for staticPod, mirrorPod := range staticPodToMirrorPodMap {
+		if mirrorPod == nil || mirrorPod.DeletionTimestamp != nil {
+			return fmt.Errorf("static pod %s is not registered", klog.KObj(staticPod))
 		}
 	}
 
@@ -3074,7 +3078,8 @@ func (kl *Kubelet) initialStaticPodsRegistration() error {
 	return nil
 }
 
-// Ensure Mirror Pod for Static Pod exists.
+// Ensure Mirror Pod for Static Pod exists and matches the current pod definition.
+// The function logs and ignores any errors.
 func (kl *Kubelet) ensureMirrorPodExists(staticPod, mirrorPod *v1.Pod) {
 	if !kubetypes.IsStaticPod(staticPod) {
 		return
@@ -3084,25 +3089,25 @@ func (kl *Kubelet) ensureMirrorPodExists(staticPod, mirrorPod *v1.Pod) {
 		if mirrorPod.DeletionTimestamp != nil || !kubepod.IsMirrorPodOf(mirrorPod, staticPod) {
 			// The mirror pod is semantically different from the static pod. Remove
 			// it. The mirror pod will get recreated later.
-			klog.InfoS("Trying to delete pod", "pod", klog.KObj(staticPod), "podUID", mirrorPod.ObjectMeta.UID)
+			klog.InfoS("Trying to delete pod", "pod", klog.KObj(mirrorPod), "podUID", mirrorPod.ObjectMeta.UID)
 			podFullName := kubecontainer.GetPodFullName(staticPod)
 			var err error
 			deleted, err = kl.mirrorPodClient.DeleteMirrorPod(podFullName, &mirrorPod.ObjectMeta.UID)
-			if deleted {
-				klog.InfoS("Deleted mirror pod because it is outdated", "pod", klog.KObj(mirrorPod))
-			} else if err != nil {
+			if err != nil {
 				klog.ErrorS(err, "Failed deleting mirror pod", "pod", klog.KObj(mirrorPod))
+			} else if deleted {
+				klog.InfoS("Deleted mirror pod", "pod", klog.KObj(mirrorPod))
 			}
 		}
 	}
 	if mirrorPod == nil || deleted {
 		node, err := kl.GetNode()
 		if err != nil {
-			klog.V(4).ErrorS(err, "No need to create a mirror pod, since failed to get node info from the cluster", "node", klog.KRef("", string(kl.nodeName)))
+			klog.ErrorS(err, "No need to create a mirror pod, since failed to get node info from the cluster", "node", klog.KRef("", string(kl.nodeName)))
 		} else if node.DeletionTimestamp != nil {
-			klog.V(4).InfoS("No need to create a mirror pod, since node has been removed from the cluster", "node", klog.KRef("", string(kl.nodeName)))
+			klog.InfoS("No need to create a mirror pod, since node has been removed from the cluster", "node", klog.KRef("", string(kl.nodeName)))
 		} else {
-			klog.V(4).InfoS("Creating a mirror pod for static pod", "pod", klog.KObj(staticPod))
+			klog.InfoS("Creating a mirror pod for static pod", "pod", klog.KObj(staticPod))
 			if err := kl.mirrorPodClient.CreateMirrorPod(staticPod); err != nil {
 				klog.ErrorS(err, "Failed creating a mirror pod for", "pod", klog.KObj(staticPod))
 			}
@@ -3112,18 +3117,19 @@ func (kl *Kubelet) ensureMirrorPodExists(staticPod, mirrorPod *v1.Pod) {
 
 // Ensure Mirror Pod for Static Pod exists as soon as node is registered.
 func (kl *Kubelet) fastStaticPodsRegistration(ctx context.Context) {
+	t := time.NewTimer(time.Second)
+	defer t.Stop()
 	for {
 		_, err := kl.GetNode()
 		if err == nil {
 			break
 		}
-		klog.V(5).ErrorS(err, "unable to ensure mirror pod because node is not registered yet", "node", klog.KRef("", string(kl.nodeName)))
+		klog.V(5).ErrorS(err, "Unable to ensure mirror pod because node is not registered yet", "node", klog.KRef("", string(kl.nodeName)))
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-t.C:
 		}
-		time.Sleep(time.Second)
 	}
 
 	staticPodToMirrorPodMap := kl.podManager.GetStaticPodToMirrorPodMap()

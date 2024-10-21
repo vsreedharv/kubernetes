@@ -3286,6 +3286,7 @@ func TestInitialStaticPodsRegistration(t *testing.T) {
 		desc              string
 		pods              []*v1.Pod
 		alreadyRegistered bool
+		nodeNotRegistered bool
 		wantErr           bool
 	}{
 		{
@@ -3315,6 +3316,12 @@ func TestInitialStaticPodsRegistration(t *testing.T) {
 			alreadyRegistered: true,
 			pods:              []*v1.Pod{staticPod},
 		},
+		{
+			desc:              "node is not yet registered",
+			nodeNotRegistered: true,
+			pods:              []*v1.Pod{staticPod},
+			wantErr:           true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -3323,6 +3330,9 @@ func TestInitialStaticPodsRegistration(t *testing.T) {
 			kubelet := testKubelet.kubelet
 			kubelet.podManager.SetPods(tc.pods)
 			kubelet.initialStaticPodsRegistered.Store(tc.alreadyRegistered)
+			if tc.nodeNotRegistered {
+				kubelet.nodeLister = testNodeLister{}
+			}
 			err := kubelet.initialStaticPodsRegistration()
 			if tc.wantErr && err == nil {
 				t.Fatal("initialStaticPodsRegistration() did not return any error, want error")
