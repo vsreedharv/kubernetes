@@ -209,7 +209,7 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 				regularContainerImgUpdateTest(ctx)
 			})
 
-			//FIXME When this occurs, the container never enters the Waiting state
+			// FIXME When this occurs, the container never enters the Waiting state
 			ginkgo.It("should restart when the image is updated with a bad image and restartPolicy=OnFailure", func(ctx context.Context) {
 				originalPodSpec.Spec.RestartPolicy = v1.RestartPolicyOnFailure
 				originalPodSpec.Name = "container-image-update-onfailure-invalid"
