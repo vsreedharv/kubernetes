@@ -2642,10 +2642,9 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 	}
 
 	tests := []struct {
-		pod           *v1.Pod
-		podIsTerminal bool
-		status        v1.PodPhase
-		test          string
+		pod    *v1.Pod
+		status v1.PodPhase
+		test   string
 	}{
 		{
 			&v1.Pod{
@@ -2660,7 +2659,6 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 					},
 				},
 			},
-			false,
 			v1.PodPending,
 			"regular init containers, restartable init container and regular container are all running",
 		},
@@ -2677,7 +2675,6 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 					},
 				},
 			},
-			false,
 			v1.PodPending,
 			"regular containers is stopped, restartable init container and regular int container are both running",
 		},
@@ -2694,7 +2691,6 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 					},
 				},
 			},
-			false,
 			v1.PodRunning,
 			"regular init container is succeeded, restartable init container is running, regular containers is stopped",
 		},
@@ -2711,7 +2707,6 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 					},
 				},
 			},
-			false,
 			v1.PodRunning,
 			"regular init container is succeeded, restartable init container and regular containers are both running",
 		},
@@ -2720,7 +2715,7 @@ func TestPodPhaseWithRestartAlwaysAndPodHasRun(t *testing.T) {
 	for _, test := range tests {
 		statusInfo := test.pod.Status.InitContainerStatuses
 		statusInfo = append(statusInfo, test.pod.Status.ContainerStatuses...)
-		status := getPhase(test.pod, statusInfo, test.podIsTerminal)
+		status := getPhase(test.pod, statusInfo, false)
 		assert.Equal(t, test.status, status, "[test %s]", test.test)
 	}
 }

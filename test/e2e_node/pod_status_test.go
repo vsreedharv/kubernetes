@@ -18,9 +18,6 @@ package e2enode
 
 import (
 	"context"
-	"fmt"
-	"time"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -108,7 +105,6 @@ var _ = SIGDescribe(framework.WithSerial(), "Pods status phase", func() {
 
 		ginkgo.By("Starting the kubelet")
 		startKubelet()
-		kubeletRestartedTime := time.Now().UTC()
 		gomega.Eventually(ctx, func() bool {
 			return kubeletHealthCheck(kubeletHealthCheckURL)
 		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be started"))
@@ -121,17 +117,10 @@ var _ = SIGDescribe(framework.WithSerial(), "Pods status phase", func() {
 		framework.ExpectNoError(err)
 		gomega.Expect(pod.Status.Phase == v1.PodPending).To(gomega.BeTrueBecause("pod should be pending during the execution of the init container after the node reboot"))
 
-		ginkgo.By("Get the logs of the init container after the kubelet restart")
-		logs, err := f.ClientSet.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &v1.PodLogOptions{
-			Container: init,
-			SinceTime: &metav1.Time{ // Use the time when the kubelet was restarted as the start point for the logs
-				Time: kubeletRestartedTime,
-			},
-		}).DoRaw(ctx)
-		framework.ExpectNoError(err)
-		// The `container Starting` log is generated in ExecCommand.
-		expectedLog := fmt.Sprintf("%s Starting", init)
-		gomega.Expect(string(logs)).To(gomega.ContainSubstring(expectedLog), "The logs should contain the expected output from the init container after the kubelet restart")
+		ginkgo.By("Parse the logs of the pod after the kubelet restart")
+		results := parseOutput(ctx, f, pod)
+		_, err = results.TimeOfStart(init)
+		framework.ExpectNoError(err, "After the node restarts, the init container should restart.")
 
 		ginkgo.By("Verifying that the pod fully starts")
 		err = e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace)
