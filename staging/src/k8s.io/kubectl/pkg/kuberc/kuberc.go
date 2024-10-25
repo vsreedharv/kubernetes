@@ -47,8 +47,9 @@ var (
 	aliasNameRegex = regexp.MustCompile("^[a-zA-Z]+$")
 	shortHandRegex = regexp.MustCompile("^-[a-zA-Z]+$")
 
-	scheme = runtime.NewScheme()
-	codecs = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
+	scheme        = runtime.NewScheme()
+	strictCodecs  = serializer.NewCodecFactory(scheme, serializer.EnableStrict)
+	lenientCodecs = serializer.NewCodecFactory(scheme)
 )
 
 func init() {
@@ -326,9 +327,20 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 	}
 
 	var pref config.Preference
-	_, gvk, err := codecs.UniversalDecoder().Decode(kubeRCBytes, nil, &pref)
+	_, gvk, err := strictCodecs.UniversalDecoder().Decode(kubeRCBytes, nil, &pref)
 	if err != nil {
-		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
+		if explicitly {
+			// explicitly specified kuberc can't be decoded and we short cut the process
+			return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
+		}
+		// default kuberc is incompatible with this version, or it simply is invalid.
+		// falling back to lenient decoding to do our best.
+		_, gvk2, err2 := lenientCodecs.UniversalDecoder().Decode(kubeRCBytes, nil, &pref)
+		if err2 != nil {
+			return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk2, err2)
+		}
+		klog.Warningf("gvk %s could not be decoded with strict decoding, continue with less strict decoding: %s", gvk, err)
+		gvk = gvk2
 	}
 
 	expectedGK := schema.GroupKind{
