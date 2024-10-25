@@ -32,6 +32,7 @@ type Preference struct {
 
 	// aliases allows defining command aliases for existing kubectl commands, with optional default flag values.
 	// If the alias name collides with a built-in command, built-in command always takes precedence.
+	// Flag overrides defined in the overrides section do NOT apply to aliases for the same command.
 	// kubectl [ALIAS NAME] [USER_FLAGS] [USER_EXPLICIT_ARGS] expands to
 	// kubectl [COMMAND] # built-in command alias points to
 	//         [KUBERC_PREPEND_ARGS]
@@ -93,7 +94,7 @@ type CommandOverride struct {
 // CommandOverrideFlag stores the name and the specified default
 // value of the flag.
 type CommandOverrideFlag struct {
-	// Flags name without dashes as prefix.
+	// Flag name (long form, without dashes).
 	Name string `json:"name"`
 
 	// In a string format of a default value. It will be parsed
