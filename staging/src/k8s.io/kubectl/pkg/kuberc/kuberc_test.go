@@ -1905,6 +1905,63 @@ func TestApplyAlias(t *testing.T) {
 			expectedErr: fmt.Errorf("duplicate alias name getcmd"),
 		},
 		{
+			name: "alias name with flags having dashes as prefix ",
+			nestedCmds: []fakeCmds[string]{
+				{
+					name: "command1",
+					flags: []fakeFlag[string]{
+						{
+							name:  "firstflag",
+							value: "test",
+						},
+					},
+				},
+			},
+			args: []string{
+				"root",
+				"getcmd",
+			},
+			getPreferencesFunc: func(kuberc string) (*config.Preference, error) {
+				return &config.Preference{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Preference",
+						APIVersion: "kubectl.config.k8s.io/v1alpha1",
+					},
+					Aliases: []config.AliasOverride{
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							AppendArgs: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "--firstflag",
+									Default: "changed",
+								},
+							},
+						},
+						{
+							Name:    "getcmd",
+							Command: "command1",
+							AppendArgs: []string{
+								"resources",
+								"nodes",
+							},
+							Flags: []config.CommandOverrideFlag{
+								{
+									Name:    "firstflag",
+									Default: "changed",
+								},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedErr: fmt.Errorf("flag name --firstflag should be in long form without dashes"),
+		},
+		{
 			name: "invalid aliasname",
 			nestedCmds: []fakeCmds[string]{
 				{

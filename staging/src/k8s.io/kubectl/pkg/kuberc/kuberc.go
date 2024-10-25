@@ -421,15 +421,34 @@ func searchInArgs(flagName string, shorthand string, allShorthands map[string]st
 }
 
 func validate(plugin *config.Preference) error {
+	validateFlag := func(flags []config.CommandOverrideFlag) error {
+		for _, flag := range flags {
+			if strings.HasPrefix(flag.Name, "-") {
+				return fmt.Errorf("flag name %s should be in long form without dashes", flag.Name)
+			}
+		}
+		return nil
+	}
 	aliases := make(map[string]struct{})
 	for _, alias := range plugin.Aliases {
 		if !aliasNameRegex.MatchString(alias.Name) {
 			return fmt.Errorf("invalid alias name, can only include alphabetical characters")
 		}
+
+		if err := validateFlag(alias.Flags); err != nil {
+			return err
+		}
+
 		if _, ok := aliases[alias.Name]; ok {
 			return fmt.Errorf("duplicate alias name %s", alias.Name)
 		}
 		aliases[alias.Name] = struct{}{}
+	}
+
+	for _, override := range plugin.Overrides {
+		if err := validateFlag(override.Flags); err != nil {
+			return err
+		}
 	}
 
 	return nil
