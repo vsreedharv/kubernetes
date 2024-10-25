@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/klog/v2"
 )
 
 const RecommendedKubeRCFileName = "kuberc"
@@ -311,9 +312,16 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 
 	kubeRCBytes, err := os.ReadFile(kubeRCFile)
 	if err != nil {
-		if os.IsNotExist(err) && !explicitly {
+		if !explicitly {
+			// We don't log if the kuberc file does not exist. Because user simply does not
+			// specify neither default kuberc file nor explicitly pass it.
+			// We'll continue to default behavior without raising any error.
+			if !os.IsNotExist(err) {
+				klog.V(4).Infof("error reading kuberc file %q: %v", kubeRCFile, err)
+			}
 			return nil, nil
 		}
+		// Kuberc is specified by user via flag or env variable and it gets an error.
 		return nil, err
 	}
 
