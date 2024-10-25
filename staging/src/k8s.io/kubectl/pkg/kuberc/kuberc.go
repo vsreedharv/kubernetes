@@ -325,7 +325,8 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 		return nil, err
 	}
 
-	obj, gvk, err := codecs.UniversalDecoder().Decode(kubeRCBytes, nil, nil)
+	var pref config.Preference
+	_, gvk, err := codecs.UniversalDecoder().Decode(kubeRCBytes, nil, &pref)
 	if err != nil {
 		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
 	}
@@ -336,11 +337,6 @@ func DefaultGetPreferences(kuberc string) (*config.Preference, error) {
 	}
 	if gvk.GroupKind() != expectedGK {
 		return nil, fmt.Errorf("unsupported preference GVK %s", gvk.GroupKind().String())
-	}
-
-	var pref config.Preference
-	if err := scheme.Convert(obj, &pref, nil); err != nil {
-		return nil, fmt.Errorf("could not be decoded gvk %s, err: %w", gvk, err)
 	}
 
 	return &pref, nil
