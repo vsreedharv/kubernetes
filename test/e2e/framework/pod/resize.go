@@ -20,20 +20,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-	kubecm "k8s.io/kubernetes/pkg/kubelet/cm"
-	"k8s.io/kubernetes/test/e2e/framework"
-	imageutils "k8s.io/kubernetes/test/utils/image"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	internalapi "k8s.io/cri-api/pkg/apis"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
+	remote "k8s.io/cri-client/pkg"
+	"k8s.io/klog/v2"
+	"k8s.io/kubelet/pkg/types"
+	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
+	kubecm "k8s.io/kubernetes/pkg/kubelet/cm"
+	"k8s.io/kubernetes/test/e2e/framework"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 const (
@@ -72,12 +80,13 @@ type ContainerAllocations struct {
 }
 
 type ResizableContainerInfo struct {
-	Name         string
-	Resources    *ContainerResources
-	Allocations  *ContainerAllocations
-	CPUPolicy    *v1.ResourceResizeRestartPolicy
-	MemPolicy    *v1.ResourceResizeRestartPolicy
-	RestartCount int32
+	Name                 string
+	Resources            *ContainerResources
+	Allocations          *ContainerAllocations
+	CPUPolicy            *v1.ResourceResizeRestartPolicy
+	MemPolicy            *v1.ResourceResizeRestartPolicy
+	RestartCount         int32
+	CpusAllowedListValue string
 }
 
 type containerPatch struct {
@@ -455,4 +464,108 @@ func ResizeContainerPatch(containers []ResizableContainerInfo) (string, error) {
 	}
 
 	return string(patchBytes), nil
+}
+
+// TODO TO replace with cpuset method
+// Credits github.com/prometheus/procfs/proc_status.go
+func calcCpusAllowedList(cpuString string) []uint64 {
+	s := strings.Split(cpuString, ",")
+
+	var g []uint64
+
+	for _, cpu := range s {
+		// parse cpu ranges, example: 1-3=[1,2,3]
+		if l := strings.Split(strings.TrimSpace(cpu), "-"); len(l) > 1 {
+			startCPU, _ := strconv.ParseUint(l[0], 10, 64)
+			endCPU, _ := strconv.ParseUint(l[1], 10, 64)
+
+			for i := startCPU; i <= endCPU; i++ {
+				g = append(g, i)
+			}
+		} else if len(l) == 1 {
+			cpu, _ := strconv.ParseUint(l[0], 10, 64)
+			g = append(g, cpu)
+		}
+
+	}
+
+	sort.Slice(g, func(i, j int) bool { return g[i] < g[j] })
+	return g
+}
+
+func VerifyPodContainersCpusAllowedListValue(f *framework.Framework, pod *v1.Pod, wantCtrs []ResizableContainerInfo) error {
+	ginkgo.GinkgoHelper()
+	verifyCpusAllowedListValue := func(cName, expectedCpusAllowedListValue string) error {
+		mycmd := "grep Cpus_allowed_list /proc/self/status | cut -f2"
+		calValue, _, err := ExecCommandInContainerWithFullOutput(f, pod.Name, cName, "/bin/sh", "-c", mycmd)
+		framework.Logf("Namespace %s Pod %s Container %s - looking for Cpus allowed list value %s in /proc/self/status",
+			pod.Namespace, pod.Name, cName, expectedCpusAllowedListValue)
+		if err != nil {
+			return fmt.Errorf("failed to find expected value '%s' in container '%s' Cpus allowred list '/proc/self/status'", cName, expectedCpusAllowedListValue)
+		}
+		cpuTotalValue := strconv.Itoa(len(calcCpusAllowedList(calValue)))
+		if cpuTotalValue != expectedCpusAllowedListValue {
+			return fmt.Errorf("container '%s' cgroup value '%s' results to total CPUs '%s' not equal to expected '%s'", cName, calValue, cpuTotalValue, expectedCpusAllowedListValue)
+		}
+		return nil
+	}
+	for _, ci := range wantCtrs {
+		if ci.CpusAllowedListValue == "" {
+			continue
+		}
+		err := verifyCpusAllowedListValue(ci.Name, ci.CpusAllowedListValue)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// getCRIClient connects CRI and returns CRI runtime service clients and image service client.
+func getCRIClient() (internalapi.RuntimeService, internalapi.ImageManagerService, error) {
+	// connection timeout for CRI service connection
+	logger := klog.Background()
+	const connectionTimeout = 2 * time.Minute
+	runtimeEndpoint := framework.TestContext.ContainerRuntimeEndpoint
+	r, err := remote.NewRemoteRuntimeService(runtimeEndpoint, connectionTimeout, noop.NewTracerProvider(), &logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	imageManagerEndpoint := runtimeEndpoint
+	if framework.TestContext.ImageServiceEndpoint != "" {
+		// ImageServiceEndpoint is the same as ContainerRuntimeEndpoint if not
+		// explicitly specified
+		imageManagerEndpoint = framework.TestContext.ImageServiceEndpoint
+	}
+	i, err := remote.NewRemoteImageService(imageManagerEndpoint, connectionTimeout, noop.NewTracerProvider(), &logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	return r, i, nil
+}
+
+// waitForAllContainerRemoval waits until all the containers on a given pod are really gone.
+// This is needed by the e2e tests which involve exclusive resource allocation (cpu, topology manager; podresources; etc.)
+// In these cases, we need to make sure the tests clean up after themselves to make sure each test runs in
+// a pristine environment. The only way known so far to do that is to introduce this wait.
+// Worth noting, however, that this makes the test runtime much bigger.
+func WaitForAllContainerRemoval(ctx context.Context, podName, podNS string) {
+	rs, _, err := getCRIClient()
+	framework.ExpectNoError(err)
+	gomega.Eventually(ctx, func(ctx context.Context) error {
+		containers, err := rs.ListContainers(ctx, &runtimeapi.ContainerFilter{
+			LabelSelector: map[string]string{
+				types.KubernetesPodNameLabel:      podName,
+				types.KubernetesPodNamespaceLabel: podNS,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("got error waiting for all containers to be removed from CRI: %w", err)
+		}
+
+		if len(containers) > 0 {
+			return fmt.Errorf("expected all containers to be removed from CRI but %v containers still remain. Containers: %+v", len(containers), containers)
+		}
+		return nil
+	}, 2*time.Minute, 1*time.Second).Should(gomega.Succeed())
 }

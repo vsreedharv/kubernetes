@@ -152,6 +152,12 @@ func doPodResizeResourceQuotaTests(f *framework.Framework) {
 		framework.ExpectNoError(delErr1, "failed to delete pod %s", newPod1.Name)
 		delErr2 := e2epod.DeletePodWithWait(ctx, f.ClientSet, newPod2)
 		framework.ExpectNoError(delErr2, "failed to delete pod %s", newPod2.Name)
+
+		// we need to wait for all containers to really be gone so cpumanager reconcile loop will not rewrite the cpu_manager_state.
+		// this is in turn needed because we will have an unavoidable (in the current framework) race with the
+		// reconcile loop which will make our attempt to delete the state file and to restore the old config go haywire
+		e2epod.WaitForAllContainerRemoval(ctx, newPod1.Name, newPod1.Namespace)
+		e2epod.WaitForAllContainerRemoval(ctx, newPod2.Name, newPod2.Namespace)
 	})
 }
 
@@ -323,7 +329,7 @@ var _ = SIGDescribe(framework.WithSerial(), "Pod InPlace Resize Container (sched
 	ginkgo.BeforeEach(func(ctx context.Context) {
 		node, err := e2enode.GetRandomReadySchedulableNode(ctx, f.ClientSet)
 		framework.ExpectNoError(err)
-		if framework.NodeOSDistroIs("windows") || e2enode.IsARM64(node) {
+		if !e2enode.NodeSupportsInPlacePodVerticalScaling(node) {
 			e2eskipper.Skipf("runtime does not support InPlacePodVerticalScaling -- skipping")
 		}
 	})
