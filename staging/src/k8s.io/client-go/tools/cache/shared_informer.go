@@ -166,7 +166,9 @@ type SharedInformer interface {
 	// AddEventHandlerWithContext is a variant of AddEventHandler and AddEventHandlerWithResyncPeriod
 	// where additional optional parameters are passed in a struct. If no resync period
 	// is specified there, AddEventHandlerWithContext behaves like AddEventHandler.
-	// The context is used for contextual logging.
+	//
+	// If new goroutines need to be started, they will use this context and stop
+	// as soon as it gets cancelled.
 	AddEventHandlerWithContext(ctx context.Context, handler ResourceEventHandler, config HandlerOptions) (ResourceEventHandlerRegistration, error)
 	// RemoveEventHandler removes a formerly added event handler given by
 	// its registration handle.
@@ -804,6 +806,15 @@ func (p *sharedProcessor) getListener(registration ResourceEventHandlerRegistrat
 	return nil
 }
 
+// addListener registers a new listener.
+//
+// If the processor was already started, it creates new goroutines which handle
+// events for this new listener. Those goroutines stop as soon as the context
+// passed in here gets canceled. Typically, this is the backgound context
+// (AddEventHandler) or a user-supplied context (AddEventHandlerWithContext).
+//
+// If the processor was not started, they will be created when
+// [sharedProcessor.run] is called, using the context that is available there.
 func (p *sharedProcessor) addListener(ctx context.Context, listener *processorListener) ResourceEventHandlerRegistration {
 	p.listenersLock.Lock()
 	defer p.listenersLock.Unlock()
