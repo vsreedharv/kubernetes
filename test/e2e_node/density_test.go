@@ -77,18 +77,16 @@ var _ = SIGDescribe("Density", framework.WithSerial(), framework.WithSlow(), fun
 	})
 
 	f.Context("create a batch of pods", framework.WithFlaky(), func() {
-		// TODO(coufon): the values are generous, set more precise limits with benchmark data
-		// and add more tests
 		dTests := []densityTest{
 			{
 				podsNr:   10,
 				interval: 0 * time.Millisecond,
 				cpuLimits: e2ekubelet.ContainersCPUSummary{
-					kubeletstatsv1alpha1.SystemContainerKubelet: {0.50: 0.30, 0.95: 0.50},
-					kubeletstatsv1alpha1.SystemContainerRuntime: {0.50: 0.40, 0.95: 0.60},
+					kubeletstatsv1alpha1.SystemContainerKubelet: {0.50: 0.1, 0.95: 0.20},
+					kubeletstatsv1alpha1.SystemContainerRuntime: {0.50: 0.1, 0.95: 1.5},
 				},
 				memLimits: e2ekubelet.ResourceUsagePerContainer{
-					kubeletstatsv1alpha1.SystemContainerKubelet: &e2ekubelet.ContainerResourceUsage{MemoryRSSInBytes: 100 * 1024 * 1024},
+					kubeletstatsv1alpha1.SystemContainerKubelet: &e2ekubelet.ContainerResourceUsage{MemoryRSSInBytes: 50 * 1024 * 1024},
 					kubeletstatsv1alpha1.SystemContainerRuntime: &e2ekubelet.ContainerResourceUsage{MemoryRSSInBytes: 500 * 1024 * 1024},
 				},
 				// percentile limit of single pod startup latency
