@@ -46,7 +46,6 @@ import (
 	netutils "k8s.io/utils/net"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -1345,10 +1344,6 @@ type Kubelet struct {
 
 	// Track node startup latencies
 	nodeStartupLatencyTracker util.NodeStartupLatencyTracker
-
-	// whether initial static pods registration was completed or not
-	// before node became ready.
-	initialStaticPodsRegistered atomic.Bool
 }
 
 // ListPodStats is delegated to StatsProvider, which implements stats.Provider interface
@@ -1680,11 +1675,11 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		// start syncing lease
 		go kl.nodeLeaseController.Run(context.Background())
 
-		// During node startup, it is possible that the static pod is running but mirror pod was not created because
-		// either the node was not registered fast enough or node informers were not synced. The mirror pods will be
-		// created eventually when the static pods are resynced 1-1.5 mins later. However, this also affects node
-		// readiness latency as we gate node readiness on initial static pods being registered. To improve the node
-		// readiness latency, we want to ensure mirror pods exists as soon as the node is registered.
+		// Mirror pods for static pods may not be created immediately during node startup 
+		// due to node registration or informer sync delays. They will be created eventually 
+		//  when static pods are resynced (every 1-1.5 minutes).
+		// To ensure kube-scheduler is aware of static pod resource usage faster, 
+		// mirror pods are created as soon as the node registers.
 		go kl.fastStaticPodsRegistration(ctx)
 	}
 	go wait.Until(kl.updateRuntimeUp, 5*time.Second, wait.NeverStop)
@@ -3051,31 +3046,6 @@ func (kl *Kubelet) PrepareDynamicResources(ctx context.Context, pod *v1.Pod) err
 // This method implements the RuntimeHelper interface
 func (kl *Kubelet) UnprepareDynamicResources(ctx context.Context, pod *v1.Pod) error {
 	return kl.containerManager.UnprepareDynamicResources(ctx, pod)
-}
-
-// initialStaticPodsRegistration ensures that all static pods are registered to the apiserver
-// before node became ready.
-func (kl *Kubelet) initialStaticPodsRegistration() error {
-	// kubelet running in standalone mode does not register static pods to the apiserver.
-	if kl.kubeClient == nil {
-		return nil
-	}
-	// Check if initial static pod registration has already been completed.
-	if kl.initialStaticPodsRegistered.Load() {
-		return nil
-	}
-	if _, err := kl.GetNode(); apierrors.IsNotFound(err) {
-		return errors.New("unable to check static pods are registered because node is not registered yet")
-	}
-	staticPodToMirrorPodMap := kl.podManager.GetStaticPodToMirrorPodMap()
-	for staticPod, mirrorPod := range staticPodToMirrorPodMap {
-		if mirrorPod == nil || mirrorPod.DeletionTimestamp != nil {
-			return fmt.Errorf("static pod %s is not registered", klog.KObj(staticPod))
-		}
-	}
-
-	kl.initialStaticPodsRegistered.Store(true)
-	return nil
 }
 
 // Ensure Mirror Pod for Static Pod exists and matches the current pod definition.
