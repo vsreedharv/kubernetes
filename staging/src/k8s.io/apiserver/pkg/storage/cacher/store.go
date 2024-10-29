@@ -19,6 +19,8 @@ package cacher
 import (
 	"fmt"
 
+	"github.com/google/btree"
+
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -26,9 +28,7 @@ import (
 )
 
 type storeIndexer interface {
-	Add(obj interface{}) error
-	Update(obj interface{}) error
-	Delete(obj interface{}) error
+	orderedStore
 	List() []interface{}
 	ListKeys() []string
 	Get(obj interface{}) (item interface{}, exists bool, err error)
@@ -37,8 +37,17 @@ type storeIndexer interface {
 	ByIndex(indexName, indexedValue string) ([]interface{}, error)
 }
 
+type orderedStore interface {
+	Add(obj interface{}) error
+	Update(obj interface{}) error
+	Delete(obj interface{}) error
+	Count(prefix, continueKey string) (count int)
+	ListPrefix(prefix, continueKey string, limit int) (items []interface{}, hasMore bool)
+	Clone() orderedStore
+}
+
 func newStoreIndexer(indexers *cache.Indexers) storeIndexer {
-	return cache.NewIndexer(storeElementKey, storeElementIndexers(indexers))
+	return newThreadedBtreeStoreIndexer(storeElementIndexers(indexers), 32)
 }
 
 // Computing a key of an object is generally non-trivial (it performs
@@ -52,6 +61,12 @@ type storeElement struct {
 	Labels labels.Set
 	Fields fields.Set
 }
+
+func (t *storeElement) Less(than btree.Item) bool {
+	return t.Key < than.(*storeElement).Key
+}
+
+var _ btree.Item = (*storeElement)(nil)
 
 func storeElementKey(obj interface{}) (string, error) {
 	elem, ok := obj.(*storeElement)

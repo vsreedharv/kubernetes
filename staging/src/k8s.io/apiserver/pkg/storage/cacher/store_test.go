@@ -28,7 +28,17 @@ import (
 )
 
 func TestStoreSingleKey(t *testing.T) {
-	store := newStoreIndexer(nil)
+	t.Run("cache.Indexer", func(t *testing.T) {
+		store := newStoreIndexer(testStoreIndexers())
+		testStoreSingleKey(t, store)
+	})
+	t.Run("btree", func(t *testing.T) {
+		store := newThreadedBtreeStoreIndexer(storeElementIndexers(testStoreIndexers()), 32)
+		testStoreSingleKey(t, store)
+	})
+}
+
+func testStoreSingleKey(t *testing.T, store storeIndexer) {
 	assertStoreEmpty(t, store, "foo")
 
 	require.NoError(t, store.Add(testStorageElement("foo", "bar", 1)))
@@ -50,7 +60,17 @@ func TestStoreSingleKey(t *testing.T) {
 }
 
 func TestStoreIndexerSingleKey(t *testing.T) {
-	store := newStoreIndexer(testStoreIndexers())
+	t.Run("cache.Indexer", func(t *testing.T) {
+		store := newStoreIndexer(testStoreIndexers())
+		testStoreIndexerSingleKey(t, store)
+	})
+	t.Run("btree", func(t *testing.T) {
+		store := newThreadedBtreeStoreIndexer(storeElementIndexers(testStoreIndexers()), 32)
+		testStoreIndexerSingleKey(t, store)
+	})
+}
+
+func testStoreIndexerSingleKey(t *testing.T, store storeIndexer) {
 	items, err := store.ByIndex("by_val", "bar")
 	require.NoError(t, err)
 	assert.Empty(t, items)
@@ -155,3 +175,56 @@ func testStoreIndexers() *cache.Indexers {
 	indexers["by_val"] = testStoreIndexFunc
 	return &indexers
 }
+
+func TestContinueCacheCleanup(t *testing.T) {
+	cache := newContinueCache()
+	cache.Set(20, fakeOrderedLister{})
+	cache.Set(30, fakeOrderedLister{})
+	cache.Set(40, fakeOrderedLister{})
+	assert.Len(t, cache.cache, 3)
+	assert.Equal(t, 3, cache.revisions.Len())
+	_, _, ok := cache.FindEqualOrLower(19)
+	assert.False(t, ok)
+	_, rv, ok := cache.FindEqualOrLower(20)
+	assert.True(t, ok)
+	assert.Equal(t, 20, int(rv))
+	_, rv, ok = cache.FindEqualOrLower(21)
+	assert.True(t, ok)
+	assert.Equal(t, 20, int(rv))
+	_, rv, ok = cache.FindEqualOrLower(32)
+	assert.True(t, ok)
+	assert.Equal(t, 30, int(rv))
+	_, rv, ok = cache.FindEqualOrLower(43)
+	assert.True(t, ok)
+	assert.Equal(t, 40, int(rv))
+
+	cache.Cleanup(20)
+	assert.Len(t, cache.cache, 2)
+	assert.Equal(t, 2, cache.revisions.Len())
+	_, _, ok = cache.FindEqualOrLower(21)
+	assert.False(t, ok)
+
+	cache.Set(20, fakeOrderedLister{})
+	cache.Set(20, fakeOrderedLister{})
+	assert.Len(t, cache.cache, 3)
+	assert.Equal(t, 3, cache.revisions.Len())
+	_, rv, ok = cache.FindEqualOrLower(21)
+	assert.True(t, ok)
+	assert.Equal(t, 20, int(rv))
+	cache.Cleanup(40)
+	assert.Len(t, cache.cache, 0)
+	assert.Equal(t, 0, cache.revisions.Len())
+	_, _, ok = cache.FindEqualOrLower(43)
+	assert.False(t, ok)
+}
+
+type fakeOrderedLister struct{}
+
+func (f fakeOrderedLister) Add(obj interface{}) error    { return nil }
+func (f fakeOrderedLister) Update(obj interface{}) error { return nil }
+func (f fakeOrderedLister) Delete(obj interface{}) error { return nil }
+func (f fakeOrderedLister) Clone() orderedStore          { return f }
+func (f fakeOrderedLister) ListPrefix(prefixKey, continueKey string, limit int) ([]interface{}, bool) {
+	return nil, false
+}
+func (f fakeOrderedLister) Count(prefixKey, continueKey string) int { return 0 }
