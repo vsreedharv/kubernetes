@@ -21,28 +21,19 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"strings"
 	"time"
 
 	"k8s.io/klog/v2"
 )
 
 var (
-	funcMap = template.FuncMap{
-		"ToLower": strings.ToLower,
-	}
-	headerTmpl *template.Template
-	dataTmpl   *template.Template
-	reg        statuszRegistry = registry{}
+	reg statuszRegistry = registry{}
 )
 
 const (
 	headerTemplate = `
-------------------------------------------------------------------------
-title: {{.ComponentName}} statusz
-description: details of the status data that {{.ComponentName}} reports.
-warning: This endpoint is not meant to be machine parseable and is for debugging purposes only.
-------------------------------------------------------------------------
+{{.ComponentName}} statusz
+Warning: This endpoint is not meant to be machine parseable, has no formatting compatibility guarantees and is for debugging purposes only.
 `
 
 	dataTemplate = `
@@ -80,7 +71,7 @@ type mux interface {
 }
 
 func Install(m mux, componentName string) {
-	err := initializeTemplates()
+	headerTmpl, dataTmpl, err := initializeTemplates()
 	if err != nil {
 		klog.Errorf("error while parsing gotemplates: %v", err)
 		return
@@ -88,21 +79,21 @@ func Install(m mux, componentName string) {
 	m.Handle("/statusz", handleStatusz(componentName, headerTmpl, dataTmpl))
 }
 
-func initializeTemplates() error {
+func initializeTemplates() (*template.Template, *template.Template, error) {
 	var err error
-	h := template.New("header").Funcs(funcMap)
-	headerTmpl, err = h.Parse(headerTemplate)
+	h := template.New("header")
+	headerTmpl, err := h.Parse(headerTemplate)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	d := template.New("data").Funcs(funcMap)
-	dataTmpl, err = d.Parse(dataTemplate)
+	d := template.New("data")
+	dataTmpl, err := d.Parse(dataTemplate)
 	if err != nil {
-		return err
+		return headerTmpl, nil, err
 	}
 
-	return nil
+	return headerTmpl, dataTmpl, nil
 }
 
 func handleStatusz(componentName string, headerTmpl, dataTmpl *template.Template) http.HandlerFunc {

@@ -28,11 +28,8 @@ import (
 )
 
 const wantTmpl = `
-------------------------------------------------------------------------
-title: %s statusz
-description: details of the status data that %s reports.
-warning: This endpoint is not meant to be machine parseable and is for debugging purposes only.
-------------------------------------------------------------------------
+%s statusz
+Warning: This endpoint is not meant to be machine parseable, has no formatting compatibility guarantees and is for debugging purposes only.
 
 Started: %v
 Up: %s
@@ -88,7 +85,6 @@ func TestStatusz(t *testing.T) {
 
 	wantResp := fmt.Sprintf(
 		wantTmpl,
-		componentName,
 		componentName,
 		fakeStartTime.Format(time.UnixDate),
 		fakeUptime,
